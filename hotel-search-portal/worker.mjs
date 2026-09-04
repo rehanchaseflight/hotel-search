@@ -1,10 +1,8 @@
 import { httpServerHandler } from "cloudflare:node";
 
-// Cloudflare Workers exposes runtime variables through process.env when
-// nodejs compatibility is enabled. Mark this process so server.js does not
-// start a traditional TCP listener or serve assets from the Node filesystem.
+// Mark this process so server.js does not start a traditional TCP listener
+// or serve assets from the Node filesystem.
 process.env.CLOUDFLARE = "true";
-process.env.NODE_ENV = "production";
 
 const { app, initPromise } = await import("./server.js");
 await initPromise;
