@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hotel Search Portal</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="login-view" class="view"><div class="card"><h1>Staff Login</h1><form id="login-form"><input type="text" id="username" placeholder="Username" required /><input type="password" id="password" placeholder="Password" required /><button type="submit">Log in</button></form><p id="login-error" class="error"></p></div></div>
+<div id="twofa-view" class="view hidden"><div class="card"><h1>Enter Authenticator Code</h1><form id="twofa-form"><input type="text" id="twofa-code" placeholder="6-digit code" maxlength="6" required /><button type="submit">Verify</button></form><p id="twofa-error" class="error"></p></div></div>
+<div id="app-view" class="view hidden"><header><h1>Hotel Search Portal</h1><div><span id="who"></span><button id="logout-btn">Log out</button></div></header>
+<section class="card"><h2>New Search</h2><form id="search-form"><input type="text" id="s-destination" placeholder="Destination / hotel city" required /><input type="date" id="s-checkin" required /><input type="date" id="s-checkout" required /><input type="number" id="s-guests" min="1" max="30" value="2" required /><button type="submit">Search Across All Sources</button></form></section>
+<section class="card hidden" id="results-section"><h2>Quick-Launch to Sources</h2><p class="hint">Click each source to open it pre-filled in a new tab. Provider credentials are protected server-side. Log in to the provider and paste the rate you find into the comparison table.</p><div id="links-list" class="links-list"></div><h2>Comparison Board</h2><form id="compare-form" class="compare-form"><select id="c-source"></select><input type="text" id="c-price" placeholder="Price" required /><input type="text" id="c-room" placeholder="Room type" /><input type="text" id="c-notes" placeholder="Notes" /><button type="submit">Add</button></form><table id="compare-table"><thead><tr><th>Source</th><th>Price</th><th>Room</th><th>Notes</th><th></th></tr></thead><tbody></tbody></table></section>
+<section class="card admin-only"><h2>Manage Sources</h2><details><summary>Manage hotel sources (credentials are protected server-side)</summary><form id="source-form" class="source-form"><input type="text" id="src-name" placeholder="Source name" required /><input type="text" id="src-url" placeholder="Login URL" required /><input type="text" id="src-template" placeholder="Deep link template (optional)" /><input type="text" id="src-username" placeholder="Site username" /><input type="password" id="src-password" placeholder="Site password" /><button type="submit">Save Source</button></form><table id="sources-table"><thead><tr><th>Name</th><th>Login URL</th><th>Username</th><th>Credentials</th><th></th></tr></thead><tbody></tbody></table></details></section>
+</div><script src="app.js"></script>
+</body></html>
