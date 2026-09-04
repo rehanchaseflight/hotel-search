@@ -20,6 +20,6 @@ export default {
       const handleRequest = await loadApp(env);
       return handleRequest(request);
     }
-    return new Response("Not found", { status: 404 });
+    return env.ASSETS.fetch(request);
   },
 };
