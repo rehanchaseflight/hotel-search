@@ -1,4 +1,4 @@
-require('dotenv').config();
+if(!process.env.CLOUDFLARE)require('dotenv').config();
 const express=require('express'),cookieParser=require('cookie-parser'),bcrypt=require('bcryptjs'),jwt=require('jsonwebtoken'),speakeasy=require('speakeasy'),helmet=require('helmet'),rateLimit=require('express-rate-limit');
 const db=require('./db');const {encrypt}=require('./crypto-util');const connectors=require('./connectors');
 const app=express();app.disable('x-powered-by');app.set('trust proxy',1);app.use(helmet({crossOriginResourcePolicy:false}));
