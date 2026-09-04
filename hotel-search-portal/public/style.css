@@ -14,4 +14,7 @@ button { background: #2b6cb0; color: white; border: none; cursor: pointer; } but
 header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; } header button { background: #718096; }
 .links-list { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; } .links-list a { display: inline-block; padding: 8px 14px; background: #edf2f7; border-radius: 6px; text-decoration: none; color: #2b6cb0; font-weight: 600; }
 table { width: 100%; border-collapse: collapse; margin-top: 10px; } th, td { text-align: left; padding: 8px; border-bottom: 1px solid #e2e8f0; font-size: 0.9rem; }
-.compare-form { margin-top: 10px; }
+.result-card { display: flex; gap: 14px; padding: 14px; margin: 10px 0; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+.result-card img { width: 110px; height: 80px; object-fit: cover; border-radius: 6px; }
+.result-card h3 { margin: 0 0 6px; font-size: 1rem; }
+.result-card p { margin: 4px 0; }
