@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<title>Hotel Search Portal</title>
-<link rel="stylesheet" href="style.css?v=10" />
+<title>Hotel Search Portal - Public Live Rates</title>
+<link rel="stylesheet" href="style.css?v=11" />
 <style>
 .supplier-summary{margin:14px 0;font-size:15px}.supplier-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.supplier-status-card{border:1px solid #ddd;border-radius:8px;padding:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;background:#fff}.supplier-status-card small{display:block;width:100%;margin-top:5px}.supplier-badge{font-size:12px;padding:3px 7px;border-radius:999px;white-space:nowrap}.supplier-badge.live{background:#e7f7ed;color:#16723a}.supplier-badge.waiting{background:#f2f3f5;color:#666}.supplier-badge.error{background:#fdecec;color:#b42318}.searching-status{padding:12px;border-radius:8px;background:#f6f8fa}.results-count{font-weight:600;margin:16px 0 8px}
 </style>
@@ -19,5 +19,5 @@
 <section class="card"><h2>New Search</h2><form id="search-form" class="search-form"><input type="text" id="s-destination" placeholder="Destination / hotel city" required /><label>Check-in<input type="date" id="s-checkin" required /></label><label>Check-out<input type="date" id="s-checkout" required /></label><label>Guests<input type="number" id="s-guests" min="1" max="30" value="2" required /></label><label>Rooms<input type="number" id="s-rooms" min="1" max="20" value="1" required /></label><label>Board<select id="s-board" required><option value="ROOM_ONLY">Room Only</option><option value="BED_AND_BREAKFAST">Bed & Breakfast</option><option value="HALF_BOARD">Half Board</option><option value="FULL_BOARD">Full Board</option><option value="ALL_INCLUSIVE">All Inclusive</option></select></label><button type="submit">Search</button></form></section>
 <section class="card hidden" id="results-section"><h2>Live Search Results</h2><div id="search-summary" class="hint"></div><div id="supplier-status"></div><div id="live-results"></div><div id="links-list" class="links-list"></div></section>
 <section class="card admin-only"><h2>Manage Sources</h2><details open><summary>Manage hotel sources (credentials are protected server-side)</summary><form id="source-form" class="source-form"><input type="text" id="src-name" placeholder="Source name" required /><input type="url" id="src-url" placeholder="Login URL" required /><input type="text" id="src-template" placeholder="Deep link template (optional)" /><input type="text" id="src-username" placeholder="Site username" /><input type="password" id="src-password" placeholder="Site password" /><button type="submit">Save Source</button></form><p id="source-error" class="error"></p><table id="sources-table"><thead><tr><th>Name</th><th>Login URL</th><th>Username</th><th>Credentials</th><th></th></tr></thead><tbody></tbody></table></details></section>
-</div><script src="app.js?v=10"></script>
+</div><script src="app.js?v=11"></script>
 </body></html>
