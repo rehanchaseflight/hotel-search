@@ -13,6 +13,11 @@ async function query(text,params=[]) { return getPool().query(text,params); }
 async function init() {
   await query(`CREATE TABLE IF NOT EXISTS staff (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, totp_secret TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'STAFF' CHECK (role IN ('SUPER_ADMIN','ADMIN','MANAGER','STAFF')), created_at TIMESTAMPTZ DEFAULT NOW())`);
   await query(`CREATE TABLE IF NOT EXISTS sources (id SERIAL PRIMARY KEY, name TEXT NOT NULL, login_url TEXT NOT NULL, deep_link_template TEXT, site_username TEXT, site_password_enc TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`);
+  // Migrate older databases that were created before all source fields existed.
+  await query(`ALTER TABLE sources ADD COLUMN IF NOT EXISTS login_url TEXT`);
+  await query(`ALTER TABLE sources ADD COLUMN IF NOT EXISTS deep_link_template TEXT`);
+  await query(`ALTER TABLE sources ADD COLUMN IF NOT EXISTS site_username TEXT`);
+  await query(`ALTER TABLE sources ADD COLUMN IF NOT EXISTS site_password_enc TEXT`);
   await query(`CREATE TABLE IF NOT EXISTS searches (id SERIAL PRIMARY KEY, staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE, destination TEXT NOT NULL, checkin DATE NOT NULL, checkout DATE NOT NULL, guests INTEGER NOT NULL, rooms INTEGER NOT NULL DEFAULT 1, board TEXT NOT NULL DEFAULT 'ROOM_ONLY', created_at TIMESTAMPTZ DEFAULT NOW())`);
   await query(`ALTER TABLE searches ADD COLUMN IF NOT EXISTS rooms INTEGER NOT NULL DEFAULT 1`);
   await query(`ALTER TABLE searches ADD COLUMN IF NOT EXISTS board TEXT NOT NULL DEFAULT 'ROOM_ONLY'`);
