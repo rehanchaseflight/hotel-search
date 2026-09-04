@@ -24,4 +24,12 @@ app.get('/api/comparisons/:searchId',auth,async(req,res)=>{if(!await canSeeSearc
 app.post('/api/comparisons',auth,async(req,res)=>{const {search_id,source_id,price,room_type,notes}=req.body||{};if(!await canSeeSearch(search_id,req.staff))return res.status(403).json({error:'Not authorized'});const n=Number(price);if(!Number.isFinite(n)||n<0||n>100000000)return res.status(400).json({error:'Invalid price'});const r=await db.query('INSERT INTO comparisons(search_id,source_id,price,room_type,notes) VALUES($1,$2,$3,$4,$5) RETURNING id',[search_id,source_id,n,String(room_type||'').slice(0,200),String(notes||'').slice(0,500)]);res.json({id:r.rows[0].id})});
 app.delete('/api/comparisons/:id',auth,async(req,res)=>{const r=await db.query('SELECT search_id FROM comparisons WHERE id=$1',[req.params.id]);if(!r.rows[0]||!await canSeeSearch(r.rows[0].search_id,req.staff))return res.status(403).json({error:'Not authorized'});await db.query('DELETE FROM comparisons WHERE id=$1',[req.params.id]);res.json({ok:true})});
 app.get('/health',async(req,res)=>{try{await db.query('SELECT 1');res.json({ok:true})}catch(e){res.status(503).json({ok:false})}});
-(async()=>{await db.init();const port=process.env.PORT||3000;app.listen(port,'0.0.0.0',()=>console.log(`Hotel portal listening on ${port}`))})().catch(e=>{console.error(e);process.exit(1)});
+
+// Netlify needs the Express app exported to the Function wrapper. Start a real
+// HTTP listener only for local/non-Netlify execution.
+const initPromise=db.init();
+initPromise.catch(e=>console.error(e));
+if(!process.env.NETLIFY){
+  initPromise.then(()=>{const port=process.env.PORT||3000;app.listen(port,'0.0.0.0',()=>console.log(`Hotel portal listening on ${port}`))}).catch(()=>process.exit(1));
+}
+module.exports={app,initPromise};
