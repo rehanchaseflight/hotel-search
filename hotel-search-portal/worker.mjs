@@ -18,8 +18,22 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/") || url.pathname === "/health") {
-      const handleRequest = await loadApp(env);
-      return handleRequest(request);
+      try {
+        const handleRequest = await loadApp(env);
+        return await handleRequest(request);
+      } catch (error) {
+        console.error("Worker application error:", error);
+        if (url.pathname === "/health") {
+          return new Response(JSON.stringify({ ok: false, error: error?.message || "Worker application error" }), {
+            status: 503,
+            headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+          });
+        }
+        return new Response(JSON.stringify({ error: "Request failed" }), {
+          status: 500,
+          headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+        });
+      }
     }
     return env.ASSETS.fetch(request);
   },
