@@ -1,0 +1,19 @@
+[build]
+  command = "cd hotel-search-portal && npm install"
+  publish = "hotel-search-portal/public"
+  functions = "hotel-search-portal/netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/health"
+  to = "/.netlify/functions/api/health"
+  status = 200
+  force = true
