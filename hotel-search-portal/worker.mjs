@@ -1,6 +1,7 @@
 let appPromise;
 
 async function loadApp(env) {
+  globalThis.__WORKER_ENV = env;
   process.env.CLOUDFLARE = "true";
   if (env.JWT_SECRET) process.env.JWT_SECRET = env.JWT_SECRET;
   if (env.DATABASE_URL) process.env.DATABASE_URL = env.DATABASE_URL;
