@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express=require('express'),cookieParser=require('cookie-parser'),bcrypt=require('bcryptjs'),jwt=require('jsonwebtoken'),speakeasy=require('speakeasy'),helmet=require('helmet'),rateLimit=require('express-rate-limit');
 const db=require('./db');const {encrypt}=require('./crypto-util');const connectors=require('./connectors');
-const app=express();app.disable('x-powered-by');app.set('trust proxy',1);app.use(helmet({crossOriginResourcePolicy:false}));app.use(express.json({limit:'100kb'}));app.use(cookieParser());app.use(express.static('public'));
+const app=express();app.disable('x-powered-by');app.set('trust proxy',1);app.use(helmet({crossOriginResourcePolicy:false}));app.use(express.json({limit:'100kb'}));app.use(cookieParser());if(!process.env.CLOUDFLARE)app.use(express.static('public'));
 const JWT_SECRET=process.env.JWT_SECRET;if(!JWT_SECRET||JWT_SECRET.length<32)throw new Error('JWT_SECRET must be at least 32 characters');
 const pending=new Map();const loginLimit=rateLimit({windowMs:15*60*1000,max:10,standardHeaders:true,legacyHeaders:false});
 function auth(req,res,next){const t=req.cookies.session;if(!t)return res.status(401).json({error:'Not logged in'});try{req.staff=jwt.verify(t,JWT_SECRET);next()}catch{return res.status(401).json({error:'Session expired, please log in again'})}}
@@ -24,5 +24,5 @@ app.get('/api/comparisons/:searchId',auth,async(req,res)=>res.json([]));
 app.delete('/api/comparisons/:id',auth,async(req,res)=>res.json({ok:true}));
 app.get('/health',async(req,res)=>{try{await db.query('SELECT 1');res.json({ok:true})}catch(e){console.error(e);res.status(503).json({ok:false})}});
 const initPromise=db.init();initPromise.catch(e=>console.error(e));
-if(!process.env.NETLIFY){initPromise.then(()=>{const port=process.env.PORT||3000;app.listen(port,'0.0.0.0',()=>console.log(`Hotel portal listening on ${port}`))}).catch(()=>process.exit(1))}
+if(!process.env.NETLIFY&&!process.env.CLOUDFLARE){initPromise.then(()=>{const port=process.env.PORT||3000;app.listen(port,'0.0.0.0',()=>console.log(`Hotel portal listening on ${port}`))}).catch(()=>process.exit(1))}
 module.exports={app,initPromise};
