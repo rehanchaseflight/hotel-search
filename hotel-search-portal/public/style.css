@@ -6,7 +6,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .card { background: white; border-radius: 10px; padding: 24px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 20px; max-width: 900px; width: 100%; }
 #login-view .card, #twofa-view .card { max-width: 360px; }
 h1 { font-size: 1.3rem; margin-top: 0; } h2 { font-size: 1.05rem; margin-top: 0; }
-input, select, button { padding: 10px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.95rem; }
+input, select, textarea, button { padding: 10px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.95rem; }
 form { display: flex; flex-wrap: wrap; gap: 8px; } form input, form select { flex: 1; min-width: 140px; }
 button { background: #2b6cb0; color: white; border: none; cursor: pointer; } button:hover { background: #245a92; }
 .error { color: #c53030; font-size: 0.9rem; } .hint { color: #555; font-size: 0.9rem; }
@@ -18,3 +18,16 @@ table { width: 100%; border-collapse: collapse; margin-top: 10px; } th, td { tex
 .result-card img { width: 110px; height: 80px; object-fit: cover; border-radius: 6px; }
 .result-card h3 { margin: 0 0 6px; font-size: 1rem; }
 .result-card p { margin: 4px 0; }
+.source-form { display: block; }
+.source-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.source-grid label { display: block; min-width: 0; font-size: 12px; font-weight: 600; }
+.source-grid input, .source-grid select, .source-grid textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 5px; }
+.source-grid .full { grid-column: 1 / -1; }
+.source-form textarea { min-height: 120px; resize: vertical; font-family: monospace; }
+.source-help { font-size: 12px; color: #52606d; line-height: 1.45; }
+.login-only-box { border: 1px solid #d9e2ec; border-radius: 10px; padding: 16px; margin: 12px 0 20px; background: #f8fbff; }
+.login-only-box h3 { margin: 0 0 6px; }
+.login-only-box p { margin: 5px 0 12px; color: #52606d; font-size: 13px; }
+.source-actions { margin-top: 12px; display: flex; gap: 10px; align-items: center; }
+.ok { color: #16723a; }
+@media(max-width:800px){ .source-grid { grid-template-columns: 1fr; } .source-grid .full { grid-column: auto; } }
