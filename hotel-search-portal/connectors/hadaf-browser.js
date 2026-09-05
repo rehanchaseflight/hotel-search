@@ -81,8 +81,6 @@ async function blocked(page) {
   }
 }
 async function login(page, source, password, cfg) {
-  // Hadaf/IOL Cloud loads the login form in a nested iframe after the outer page.
-  // Wait for the known login control instead of assuming it exists at DOMContentLoaded.
   let loginFrame = null;
   const waitMs = Number(cfg.login_frame_timeout_ms) || 15000;
   const started = Date.now();
@@ -115,6 +113,38 @@ async function fillField(page, purpose, value, selectors) {
   if (!ranked) return false;
   try { await ranked.el.fill(String(value)); await ranked.el.press('Tab').catch(() => {}); return true; } catch { return false; }
 }
+async function findHadafSearchButton(page, cfg) {
+  const direct = await findInFrames(page, [
+    cfg.search_button_selector,
+    '#btnSearch',
+    '[id*="search" i]',
+    '[name*="search" i]',
+    '[value*="search" i]',
+    '[title*="search" i]',
+    '[aria-label*="search" i]',
+    'button:has-text("Search")',
+    'a:has-text("Search")',
+    'input[type="submit"]',
+    'input[type="button"]'
+  ].filter(Boolean));
+  if (direct) return direct;
+
+  for (const frame of await frames(page)) {
+    const candidates = frame.locator('button:visible, input:visible, a:visible').filter({ hasText: /search/i });
+    if (await candidates.count().catch(() => 0)) return candidates.first();
+
+    const meta = frame.locator('button:visible, input:visible, a:visible');
+    const n = await meta.count().catch(() => 0);
+    for (let i = 0; i < n; i++) {
+      const el = meta.nth(i);
+      const text = clean(await el.innerText().catch(() => ''));
+      const attrs = await Promise.all(['id', 'name', 'value', 'title', 'aria-label'].map(a => el.getAttribute(a).catch(() => '')));
+      const hay = `${text} ${attrs.join(' ')}`.toLowerCase();
+      if (/\bsearch\b/.test(hay)) return el;
+    }
+  }
+  return null;
+}
 async function performSearch(page, search, cfg) {
   if (cfg.search_url_template) {
     const url = String(cfg.search_url_template)
@@ -135,7 +165,7 @@ async function performSearch(page, search, cfg) {
   await fillField(page, 'guests', search.guests, [cfg.guests_selector, 'input[name*="adult" i]', 'input[id*="adult" i]', 'input[name*="guest" i]', 'input[id*="guest" i]'].filter(Boolean));
   await fillField(page, 'rooms', search.rooms || 1, [cfg.rooms_selector, 'input[name*="room" i]', 'input[id*="room" i]'].filter(Boolean));
 
-  const button = await findInFrames(page, [cfg.search_button_selector, '#btnSearch', 'input[value*="search" i]', 'button:has-text("Search")', 'input[type="submit"]', 'button[type="submit"]'].filter(Boolean));
+  const button = await findHadafSearchButton(page, cfg);
   if (!button) throw new Error('Hadaf search button could not be detected');
   await button.click({ timeout: 10000 });
 }
