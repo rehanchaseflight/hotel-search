@@ -2,7 +2,7 @@ const { chromium } = require('playwright');
 const { decrypt } = require('../crypto-util');
 
 const clean = v => String(v ?? '').replace(/\s+/g, ' ').trim();
-const PRICE_RE = /(?:AED|SAR|USD|EUR|GBP|PKR|US\$|\$)\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?/i;
+const PRICE_RE = /(?:AED|SAR|USD|EUR|GBP|PKR|US\$|\$)\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?|\b[0-9]{2,6}\.[0-9]{2}\b/i;
 function price(v) {
   const m = clean(v).replace(/,/g, '').match(/([0-9]+(?:\.[0-9]{1,2})?)/);
   return m ? Number(m[1]) : NaN;
@@ -80,22 +80,22 @@ async function searchPortal(page,s,cfg) {
   const btn=await find(page,[cfg.search_button_selector,'#btnSearch','input[value*="search" i]','button:has-text("Search")','a:has-text("Search")','input[type="submit"]']);
   if(!btn) throw new Error('Hadaf search button could not be detected'); await btn.click({timeout:10000});
 }
-function parseRate(text) {
-  const t=clean(text), pm=t.match(PRICE_RE); if(!pm) return null; const p=price(pm[0]); if(!Number.isFinite(p)||p<=0)return null;
-  const cur=(pm[0].match(/AED|SAR|USD|EUR|GBP|PKR|US\$|\$/i)||[''])[0];
+function parseRate(text, defaultCurrency='AED') {
+  const t=clean(text), pm=t.match(PRICE_RE); if(!pm) return null;
+  const p=price(pm[0]); if(!Number.isFinite(p)||p<=0)return null;
+  const cur=(pm[0].match(/AED|SAR|USD|EUR|GBP|PKR|US\$|\$/i)||[''])[0] || defaultCurrency;
   const board=(t.match(/Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive/i)||[''])[0];
   const cancel=(t.match(/Non[- ]?refundable|Free Cancellation|Refundable/i)||[''])[0];
   const avail=(t.match(/Available|On Request|Sold Out|Not Available/i)||[''])[0]||'Available';
   const room=(t.match(/(?:Triple|Twin|Double|Single|Quadruple|Family|Deluxe|Standard|Superior|King|Queen|Suite|Apartment|Villa)[^|]*?(?:Room|Suite|Bed|Only|Included)?/i)||[''])[0];
-  return {price:p,currency:cur,board:clean(board),cancellation:clean(cancel),availability:clean(avail),room:clean(room),raw:t};
+  return {price:p,currency:clean(cur),board:clean(board),cancellation:clean(cancel),availability:clean(avail),room:clean(room),raw:t};
 }
 async function extract(page,cfg) {
   const out=[];
   for(const frame of await allFrames(page)) {
-    // Primary Hadaf layout: rate rows are table rows containing AED and the room/rate text.
     const items=await frame.locator('tr:visible').evaluateAll(rows=>rows.map((row,i)=>{
       const text=String(row.innerText||row.textContent||'').replace(/\s+/g,' ').trim();
-      if(!/(?:AED|SAR|USD|EUR|GBP|PKR|US\$|\$)\s*[0-9]/i.test(text)) return null;
+      if(!PRICE_RE.test(text)) return null;
       let hotel=''; let node=row;
       for(let d=0;node&&d<10;d++,node=node.parentElement){
         const pool=[];
@@ -104,21 +104,23 @@ async function extract(page,cfg) {
           if(x && x.length<180 && !/hotel search|room type|price|status|non-refundable|available/i.test(x)) pool.push(x);
         }
         if(pool.length){ hotel=pool[pool.length-1]; break; }
-        let p=row.previousElementSibling; let steps=0;
-        while(p&&steps++<12){ const x=String(p.innerText||p.textContent||'').replace(/\s+/g,' ').trim(); if(x&&x.length<180&&!/(?:AED|SAR|USD|EUR|GBP|PKR|US\$|\$)\s*[0-9]/i.test(x)&&/makkah|hotel|resort|suites|residence/i.test(x)){hotel=x;break;} p=p.previousElementSibling; }
+        let p=row.previousElementSibling, steps=0;
+        while(p&&steps++<12){ const x=String(p.innerText||p.textContent||'').replace(/\s+/g,' ').trim(); if(x&&x.length<180&&!PRICE_RE.test(x)&&/makkah|hotel|resort|suites|residence/i.test(x)){hotel=x;break;} p=p.previousElementSibling; }
         if(hotel) break;
       }
       return {i,text,hotel};
     }).filter(Boolean)).catch(()=>[]);
-    for(const x of items){const r=parseRate(x.text); if(r) out.push({hotel:clean(x.hotel),...r});}
+    for(const x of items){const r=parseRate(x.text,cfg.default_currency||'AED'); if(r) out.push({hotel:clean(x.hotel),...r});}
 
-    // Secondary fallback: inspect visible elements that directly contain a price.
-    const els=await frame.locator('body *:visible').evaluateAll(nodes=>nodes.map((e,i)=>{const t=String(e.innerText||'').replace(/\s+/g,' ').trim();return t&&t.length<500&&PRICE_RE.test(t)?{i,t}:null}).filter(Boolean).slice(0,2000)).catch(()=>[]);
-    for(const x of els){
-      const r=parseRate(x.t); if(!r) continue;
-      // Only accept compact elements, avoiding whole-page duplicate text.
-      if(x.t.length>220) continue;
-      out.push({hotel:'',...r});
+    const els=await frame.locator('body *:visible').evaluateAll(nodes=>nodes.map((e,i)=>{const t=String(e.innerText||'').replace(/\s+/g,' ').trim();return t&&t.length<500&&PRICE_RE.test(t)?{i,t}:null}).filter(Boolean).slice(0,3000)).catch(()=>[]);
+    for(const x of els){ if(x.t.length>220) continue; const r=parseRate(x.t,cfg.default_currency||'AED'); if(r) out.push({hotel:'',...r}); }
+
+    const bodyText=await frame.locator('body').innerText().catch(()=> '');
+    const lines=String(bodyText).split(/\r?\n/).map(clean).filter(Boolean);
+    for(let i=0;i<lines.length;i++){
+      if(!PRICE_RE.test(lines[i])) continue;
+      const r=parseRate(lines[i],cfg.default_currency||'AED');
+      if(r) out.push({hotel:'',...r});
     }
   }
   const seen=new Set();
@@ -132,8 +134,14 @@ async function searchHadafSource(source,search) {
   try{
     browser=await chromium.launch({headless:true}); context=await browser.newContext({viewport:{width:1440,height:1000}}); const page=await context.newPage(); page.setDefaultTimeout(Number(cfg.timeout_ms)||15000);
     await page.goto(source.login_url,{waitUntil:'domcontentloaded',timeout:30000}); await login(page,source,password,cfg); await searchPortal(page,search,cfg);
-    await page.waitForTimeout(Number(cfg.results_wait_ms)||10000); await blocked(page);
-    const rows=await extract(page,cfg); const results=rows.map((r,i)=>({id:`${source.id}-${i}`,supplier:source.name,hotel:r.hotel||'Hotel',room:r.room||'',view:r.view||'',board:r.board||search.board||'',cancellation:r.cancellation||'',price:Number(r.price),currency:r.currency||cfg.default_currency||'',availability:r.availability||'Available',raw:r.raw||r,image:'',bookingUrl:''}));
+    await page.waitForTimeout(Number(cfg.results_wait_ms)||10000);
+    await blocked(page);
+    const pages=[...context.pages()];
+    const all=[];
+    for(const p of pages){
+      try{ await blocked(p); const rows=await extract(p,cfg); all.push(...rows); }catch{}
+    }
+    const rows=all; const results=rows.map((r,i)=>({id:`${source.id}-${i}`,supplier:source.name,hotel:r.hotel||'Hotel',room:r.room||'',view:r.view||'',board:r.board||search.board||'',cancellation:r.cancellation||'',price:Number(r.price),currency:r.currency||cfg.default_currency||'AED',availability:r.availability||'Available',raw:r.raw||r,image:'',bookingUrl:''}));
     if(!results.length)return{configured:true,results:[],error:'Hadaf login/search completed but no priced rates were extracted'};
     return{configured:true,results,error:null};
   }catch(e){return{configured:true,results:[],error:e.name==='TimeoutError'?'Hadaf browser timed out':e.message};}
