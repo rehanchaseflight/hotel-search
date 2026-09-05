@@ -7,8 +7,8 @@ const STORAGE_PATH = path.join(SESSION_DIR, 'storage-state.json');
 const STATUS_PATH = path.join(SESSION_DIR, 'status.json');
 const REZLIVE_HOME = 'https://www.rezlive.com/common/index';
 const CHROME_USER_DATA = process.env.REZLIVE_CHROME_USER_DATA || path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'User Data');
-const CHROME_PROFILE = process.env.REZLIVE_CHROME_PROFILE || '';
-const CHROME_DISPLAY_NAME = process.env.REZLIVE_CHROME_PROFILE_NAME || 'Chaseflight';
+const CHROME_PROFILE = process.env.REZLIVE_CHROME_PROFILE || 'Profile 2';
+const CHROME_DISPLAY_NAME = 'Chaseflight';
 let activeLogin = null;
 
 function ensureDir() {
@@ -26,20 +26,6 @@ function readStatus() {
   catch { return { status: 'not_connected', error: null }; }
 }
 
-function resolveChromeProfile() {
-  if (CHROME_PROFILE) return CHROME_PROFILE;
-  const localState = path.join(CHROME_USER_DATA, 'Local State');
-  if (!fs.existsSync(localState)) return 'Default';
-  try {
-    const data = JSON.parse(fs.readFileSync(localState, 'utf8'));
-    const info = data?.profile?.info_cache || {};
-    const match = Object.entries(info).find(([, value]) => String(value?.name || '').trim().toLowerCase() === CHROME_DISPLAY_NAME.toLowerCase());
-    return match?.[0] || data?.profile?.last_used || 'Default';
-  } catch {
-    return 'Default';
-  }
-}
-
 async function connectRezLive() {
   if (activeLogin) return { ok: true, status: 'already_connecting' };
   ensureDir();
@@ -48,27 +34,29 @@ async function connectRezLive() {
     let context = null;
     try {
       if (!fs.existsSync(CHROME_USER_DATA)) throw new Error(`Chrome user-data directory not found: ${CHROME_USER_DATA}`);
-      const profile = resolveChromeProfile();
-      console.log(`Using Chrome profile '${CHROME_DISPLAY_NAME}' (${profile}).`);
+      console.log(`Using Chrome profile '${CHROME_DISPLAY_NAME}' (${CHROME_PROFILE}).`);
       console.log('IMPORTANT: close ALL normal Chrome windows before continuing.');
 
       context = await chromium.launchPersistentContext(CHROME_USER_DATA, {
         channel: 'chrome',
         headless: false,
         viewport: { width: 1440, height: 1000 },
-        args: [`--profile-directory=${profile}`]
+        args: [`--profile-directory=${CHROME_PROFILE}`, '--no-first-run', '--no-default-browser-check']
       });
-      let page = context.pages()[0] || await context.newPage();
+
+      for (const p of context.pages()) await p.close().catch(() => {});
+      const page = await context.newPage();
+      page.setDefaultTimeout(15000);
+      console.log('Opening RezLive Agent Login...');
       await page.goto(REZLIVE_HOME, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      console.log(`RezLive opened with Chrome profile '${profile}'.`);
-      console.log('If your existing Chaseflight session is valid, the RezLive hotel search should open without a new authenticator challenge.');
-      console.log('If RezLive asks for a new authenticator code, stop here and tell me; do not enter or share the code.');
+      console.log(`RezLive URL: ${page.url()}`);
+      console.log('If your Chaseflight RezLive session is valid, you should see the authenticated hotel area.');
+      console.log('Do not enter or share a new authenticator code.');
 
       const deadline = Date.now() + 3 * 60 * 1000;
       while (Date.now() < deadline) {
         if (page.isClosed()) throw new Error('RezLive browser was closed before the session could be saved.');
-        const url = page.url();
-        if (!url.includes('/login')) {
+        if (!page.url().includes('/login')) {
           await context.storageState({ path: STORAGE_PATH });
           writeStatus('connected');
           await context.close().catch(() => {});
