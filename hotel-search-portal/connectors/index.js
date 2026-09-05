@@ -1,5 +1,5 @@
 const { searchBrowserSource } = require('./browser');
-const { searchRateLocSource } = require('./rateloc-browser');
+const { searchRateLocSource } = require('./rateloc-browser-v2');
 const CONNECTORS = [
   { id:'public-market',name:'Public Hotel Market',type:'public' },
   { id:'rezlive',name:'RezLive',type:'rezlive',urlEnv:'REZLIVE_API_URL',keyEnv:'REZLIVE_API_KEY',agentEnv:'REZLIVE_AGENT_CODE',userEnv:'REZLIVE_API_USERNAME',cityEnv:'REZLIVE_CITY_CODE',countryEnv:'REZLIVE_COUNTRY_CODE',nationalityEnv:'REZLIVE_GUEST_NATIONALITY' },
@@ -23,7 +23,7 @@ const CONNECTORS = [
   { id:'anjum-hotel-makkah',name:'Anjum Hotel Makkah',type:'api',urlEnv:'ANJUM_API_URL',keyEnv:'ANJUM_API_KEY' }
 ];
 function configuredConnectors(){return CONNECTORS.map(c=>({id:c.id,name:c.name,configured:c.type==='public'||c.type==='browser'||Boolean(c.urlEnv&&process.env[c.urlEnv]),status:c.type==='public'?'public':c.type==='browser'?'database':(c.urlEnv&&process.env[c.urlEnv])?'ready':'awaiting_api'}))}
-function xmlEscape(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&apos;')}
+function xmlEscape(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\"/g,'&quot;').replace(/'/g,'&apos;')}
 function tag(xml,name){const m=xml.match(new RegExp(`<${name}>([\\s\\S]*?)<\\/${name}>`,'i'));return m?m[1].trim():''}
 function tags(xml,name){const re=new RegExp(`<${name}>([\\s\\S]*?)<\\/${name}>`,'gi');const out=[];let m;while((m=re.exec(xml)))out.push(m[1].trim());return out}
 function normalize(raw,connector,search){const items=Array.isArray(raw)?raw:(raw?.hotels||raw?.results||raw?.data||raw?.offers||raw?.properties||raw?.items||[]);if(!Array.isArray(items))return[];return items.flatMap((h,i)=>{const rooms=Array.isArray(h.roomDetails)?h.roomDetails:Array.isArray(h.rooms)?h.rooms:[h];return rooms.map((room,j)=>({id:String(room.bookingKey??room.booking_key??h.id??h.hotelId??h.hotel_id??h.code??`${connector.id}-${i}-${j}`),supplier:connector.name,hotel:h.hotel??h.hotelName??h.hotel_name??h.name??h.propertyName??'Hotel',room:room.room??room.roomName??room.roomType??room.room_type??room.room_name??h.room??'',view:room.view??room.roomView??room.room_view??room.viewName??h.view??'',board:room.board??room.boardName??room.boardType??room.board_type??room.mealPlan??h.board??search.board,price:Number((typeof room.price==='object'?room.price.total:room.price)??room.totalRate??room.totalPrice??room.total_price??h.price??h.totalPrice??h.total_price??h.amount??NaN),currency:(typeof room.price==='object'?room.price.currency:null)??room.currency??h.currency??h.currencyCode??h.currency_code??'',cancellation:room.cancellation??room.cancellationPolicy??room.cancelPolicy??h.cancellation??(room.freeCancellation?'Free cancellation':''),availability:room.availability??room.status??h.availability??'Available',image:'',bookingUrl:'',raw:h}))})}
