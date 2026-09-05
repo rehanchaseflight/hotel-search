@@ -81,10 +81,14 @@ async function blocked(page) {
   }
 }
 async function login(page, source, password, cfg) {
-  let loginFrame = await frameWith(page, '#tbUserName');
-  if (!loginFrame) {
-    await page.waitForTimeout(1500);
+  // Hadaf/IOL Cloud loads the login form in a nested iframe after the outer page.
+  // Wait for the known login control instead of assuming it exists at DOMContentLoaded.
+  let loginFrame = null;
+  const waitMs = Number(cfg.login_frame_timeout_ms) || 15000;
+  const started = Date.now();
+  while (!loginFrame && Date.now() - started < waitMs) {
     loginFrame = await frameWith(page, '#tbUserName');
+    if (!loginFrame) await page.waitForTimeout(500);
   }
   if (!loginFrame) throw new Error('Hadaf login iframe could not be detected');
 
