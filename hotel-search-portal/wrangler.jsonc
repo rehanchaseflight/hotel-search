@@ -3,6 +3,9 @@
   "name": "hotel-search",
   "main": "./worker.mjs",
   "compatibility_date": "2026-09-04",
+  "vars": {
+    "BACKEND_URL": "https://YOUR-RENDER-SERVICE.onrender.com"
+  },
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
