@@ -10,6 +10,7 @@ async function searchBrowserSource(source,search){
  try{
   browser=await chromium.launch({headless:true});context=await browser.newContext({viewport:{width:1440,height:1000}});const page=await context.newPage();page.setDefaultTimeout(Number(cfg.timeout_ms)||12000);
   await page.goto(source.login_url,{waitUntil:'domcontentloaded',timeout:30000});
+  if(cfg.agent_code_selector&&source.agent_code)await page.locator(cfg.agent_code_selector).fill(source.agent_code);
   if(cfg.username_selector)await page.locator(cfg.username_selector).fill(source.site_username);
   if(cfg.password_selector)await page.locator(cfg.password_selector).fill(password);
   if(cfg.login_button_selector)await page.locator(cfg.login_button_selector).click();else if(cfg.password_selector)await page.locator(cfg.password_selector).press('Enter');
