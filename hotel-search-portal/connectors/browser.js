@@ -16,6 +16,182 @@ function text(v) { return String(v ?? '').replace(/\s+/g, ' ').trim(); }
 function number(v) { const m = text(v).replace(/,/g, '').match(/-?\d+(?:\.\d+)?/); return m ? Number(m[0]) : NaN; }
 function sourceSelector(explicit, fallbacks) { return explicit || fallbacks[0] || null; }
 
+async function firstVisible(page, selectors) {
+  for (const selector of selectors.filter(Boolean)) {
+    try {
+      const loc = page.locator(selector).filter({ visible: true }).first();
+      if (await loc.count() && await loc.isVisible()) return loc;
+    } catch {}
+    try {
+      const loc = page.locator(selector).first();
+      if (await loc.count() && await loc.isVisible()) return loc;
+    } catch {}
+  }
+  return null;
+}
+
+async function scoreInputs(page, purpose) {
+  const inputs = page.locator('input:visible, textarea:visible');
+  const count = await inputs.count().catch(() => 0);
+  const rows = [];
+  for (let i = 0; i < count; i++) {
+    const el = inputs.nth(i);
+    const meta = text([
+      await el.getAttribute('type').catch(() => ''),
+      await el.getAttribute('name').catch(() => ''),
+      await el.getAttribute('id').catch(() => ''),
+      await el.getAttribute('placeholder').catch(() => ''),
+      await el.getAttribute('aria-label').catch(() => ''),
+      await el.getAttribute('autocomplete').catch(() => '')
+    ].join(' ')).toLowerCase();
+    let score = 0;
+    if (purpose === 'username') {
+      if (/email|user|login|account|agent/.test(meta)) score += 20;
+      if (/password|date|check|guest|room|search/.test(meta)) score -= 10;
+      if ((await el.getAttribute('type').catch(() => '')) === 'email') score += 8;
+    } else if (purpose === 'password') {
+      if ((await el.getAttribute('type').catch(() => '')) === 'password') score += 50;
+      if (/pass|pwd/.test(meta)) score += 10;
+    } else if (purpose === 'destination') {
+      if (/destination|location|city|area|hotel|property|going to|search/.test(meta)) score += 20;
+      if (/date|check|guest|room|nationality|promo|email|password/.test(meta)) score -= 12;
+    } else if (purpose === 'date') {
+      if (/check.?in|check.?out|arrival|departure|date/.test(meta)) score += 20;
+      if (/destination|location|guest|room|nationality|email|password/.test(meta)) score -= 10;
+    } else if (purpose === 'guests') {
+      if (/guest|adult|traveller|traveler|pax|passenger/.test(meta)) score += 20;
+      if (/room|date|destination|email|password/.test(meta)) score -= 8;
+    } else if (purpose === 'rooms') {
+      if (/room/.test(meta)) score += 25;
+      if (/guest|adult|date|destination|email|password/.test(meta)) score -= 8;
+    }
+    rows.push({ el, score, index: i, meta });
+  }
+  return rows.sort((a, b) => b.score - a.score || a.index - b.index);
+}
+
+async function fillSmart(page, purpose, value, explicitSelector) {
+  const explicit = await firstVisible(page, [explicitSelector]);
+  const ranked = explicit || (await scoreInputs(page, purpose))[0]?.el;
+  if (!ranked) return false;
+  try {
+    await ranked.fill(String(value));
+    await ranked.press('Tab').catch(() => {});
+    return true;
+  } catch {}
+  return false;
+}
+
+async function loginGeneric(page, source, cfg, password) {
+  const username = await firstVisible(page, [
+    cfg.username_selector,
+    'input[type="email"]:visible',
+    'input[autocomplete="username"]:visible',
+    'input[name*="email" i]:visible',
+    'input[name*="user" i]:visible',
+    'input[id*="email" i]:visible',
+    'input[id*="user" i]:visible'
+  ]);
+  const passwordLoc = await firstVisible(page, [
+    cfg.password_selector,
+    'input[type="password"]:visible',
+    'input[autocomplete="current-password"]:visible'
+  ]);
+  const userSmart = username || (await scoreInputs(page, 'username'))[0]?.el;
+  const passSmart = passwordLoc || (await scoreInputs(page, 'password'))[0]?.el;
+  if (!userSmart || !passSmart) throw new Error('Supplier login fields could not be detected');
+
+  await userSmart.fill(String(source.site_username || ''));
+  await passSmart.fill(String(password || ''));
+
+  const loginButton = await firstVisible(page, [
+    cfg.login_button_selector,
+    'button:has-text("LOGIN")',
+    'button:has-text("Login")',
+    'button:has-text("Sign in")',
+    'button[type="submit"]:visible',
+    'input[type="submit"]:visible'
+  ]);
+  if (loginButton) await loginButton.click(); else await passSmart.press('Enter');
+  await page.waitForLoadState('domcontentloaded').catch(() => {});
+  await page.waitForTimeout(Number(cfg.post_login_wait_ms) || 2500);
+}
+
+async function navigateGenericSearch(page, search, cfg) {
+  const searchUrl = cfg.search_url_template ? fillTemplate(cfg.search_url_template, search) : '';
+  if (searchUrl) {
+    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    return;
+  }
+
+  await fillSmart(page, 'destination', search.destination, cfg.destination_selector);
+  await fillSmart(page, 'date', search.checkin, cfg.checkin_selector);
+  await fillSmart(page, 'date', search.checkout, cfg.checkout_selector);
+  await fillSmart(page, 'guests', search.guests, cfg.guests_selector);
+  await fillSmart(page, 'rooms', search.rooms || 1, cfg.rooms_selector);
+
+  if (cfg.board_selector) {
+    const board = await firstVisible(page, [cfg.board_selector]);
+    if (board) await board.selectOption(String(search.board || 'ROOM_ONLY')).catch(() => {});
+  }
+
+  const searchButton = await firstVisible(page, [
+    cfg.search_button_selector,
+    'button:has-text("SEARCH")',
+    'button:has-text("Search")',
+    'button:has-text("Find")',
+    'button:has-text("CHECK AVAILABILITY")',
+    'button[type="submit"]:visible',
+    'input[type="submit"]:visible'
+  ]);
+  if (!searchButton) throw new Error('Supplier search button could not be detected');
+  await searchButton.click();
+}
+
+async function extractGenericRates(page, cfg) {
+  if (cfg.result_row_selector) return extractConfiguredRows(page, cfg);
+  return page.evaluate(() => {
+    const clean = v => String(v ?? '').replace(/\s+/g, ' ').trim();
+    const priceRe = /(?:AED|SAR|USD|EUR|GBP|PKR|US\$|\$)\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?/i;
+    const boardRe = /\b(room only|bed\s*&?\s*breakfast|breakfast included|breakfast|half board|full board|all inclusive|with breakfast|no meal)\b/i;
+    const cancelRe = /\b(non.?refundable|free cancellation|cancellation policy|refundable|cancel(?:l)ation)\b/i;
+    const roomRe = /\b(single|double|twin|triple|quad|family|king|queen|deluxe|classic|superior|premier|guest room|suite|studio|room)\b/i;
+    const viewRe = /\b(city view|sea view|garden view|pool view|kaaba view|haram view|partial view|no view|view)\b/i;
+    const availabilityRe = /\b(available|rooms? left|on request|sold out)\b/i;
+    const seen = new Set();
+    const out = [];
+    const leaves = Array.from(document.querySelectorAll('body *')).filter(el => {
+      const t = clean(el.textContent);
+      return priceRe.test(t) && (el.children.length === 0 || t.length < 300);
+    });
+    for (const leaf of leaves) {
+      let root = leaf;
+      for (let i = 0; i < 12 && root.parentElement; i++) {
+        const t = clean(root.innerText || root.textContent);
+        if (t.length >= 100 && t.length <= 2200 && priceRe.test(t)) break;
+        root = root.parentElement;
+      }
+      const raw = clean(root.innerText || root.textContent);
+      if (!raw || seen.has(raw)) continue;
+      seen.add(raw);
+      const priceMatch = raw.match(priceRe);
+      if (!priceMatch) continue;
+      const lines = raw.split(/\n+/).map(clean).filter(Boolean);
+      const price = Number(priceMatch[0].replace(/[^0-9.]/g, ''));
+      if (!Number.isFinite(price) || price <= 0) continue;
+      const currencyMatch = priceMatch[0].match(/AED|SAR|USD|EUR|GBP|PKR|US\$|\$/i);
+      const hotel = lines.find(x => /hotel|resort|inn|suites/i.test(x)) || lines[0] || 'Hotel';
+      const room = lines.find(x => roomRe.test(x) && !priceRe.test(x)) || '';
+      const view = lines.find(x => viewRe.test(x)) || '';
+      const board = lines.find(x => boardRe.test(x)) || '';
+      const cancellation = lines.find(x => cancelRe.test(x)) || '';
+      const availability = lines.find(x => availabilityRe.test(x)) || 'Available';
+      out.push({ hotel, room, view, board, cancellation, availability, price, currency: currencyMatch ? currencyMatch[0].replace('US$','USD').replace('$','USD').toUpperCase() : '', raw });
+    }
+    return out.slice(0, 500);
+  });
+}
+
 async function searchRezLive(page, search, cfg) {
   if (!cfg._authenticated) {
     const username = sourceSelector(cfg.username_selector, [
@@ -129,34 +305,36 @@ async function searchBrowserSource(source, search) {
     const page = await context.newPage();
     page.setDefaultTimeout(Number(cfg.timeout_ms) || 12000);
     await page.goto(source.login_url, { waitUntil:'domcontentloaded', timeout:30000 });
-    let rows;
-    if (cfg.preset === 'rezlive') {
-      rows = await searchRezLive(page, search, { ...cfg, _username:source.site_username, _password:password });
-    } else {
-      if (cfg.agent_code_selector && source.agent_code) await page.locator(cfg.agent_code_selector).fill(source.agent_code);
-      if (cfg.username_selector) await page.locator(cfg.username_selector).fill(source.site_username);
-      if (cfg.password_selector) await page.locator(cfg.password_selector).fill(password);
-      if (cfg.login_button_selector) await page.locator(cfg.login_button_selector).click(); else if (cfg.password_selector) await page.locator(cfg.password_selector).press('Enter');
-      await page.waitForLoadState('domcontentloaded').catch(()=>{});
-      if (cfg.post_login_wait_ms) await page.waitForTimeout(Number(cfg.post_login_wait_ms));
-      const searchUrl = fillTemplate(cfg.search_url_template, search);
-      if (searchUrl) await page.goto(searchUrl,{waitUntil:'domcontentloaded',timeout:30000});
-      else {
-        if (cfg.destination_selector) await page.locator(cfg.destination_selector).fill(search.destination);
-        if (cfg.checkin_selector) await page.locator(cfg.checkin_selector).fill(search.checkin);
-        if (cfg.checkout_selector) await page.locator(cfg.checkout_selector).fill(search.checkout);
-        if (cfg.guests_selector) await page.locator(cfg.guests_selector).fill(String(search.guests));
-        if (cfg.rooms_selector) await page.locator(cfg.rooms_selector).fill(String(search.rooms||1));
-        if (cfg.board_selector) await page.locator(cfg.board_selector).selectOption(String(search.board||'ROOM_ONLY')).catch(()=>{});
-        if (cfg.search_button_selector) await page.locator(cfg.search_button_selector).click();
-      }
-      if (cfg.results_wait_for_selector) await page.locator(cfg.results_wait_for_selector).first().waitFor({state:'visible',timeout:Number(cfg.results_timeout_ms)||20000}); else if (cfg.results_wait_ms) await page.waitForTimeout(Number(cfg.results_wait_ms));
-      rows = cfg.result_row_selector ? await extractConfiguredRows(page,cfg) : [];
-    }
-    const results = rows.map((r,i)=>({id:`${source.id}-${i}`,supplier:source.name,hotel:r.hotel||'Hotel',room:r.room||'',view:r.view||'',board:r.board||search.board||'',cancellation:r.cancellation||'',price:Number.isFinite(r.price)?r.price:number(r.price),currency:r.currency||cfg.default_currency||'',availability:r.availability||'',raw:r.raw||r})).filter(r=>r.hotel!=='Hotel'||r.room||Number.isFinite(r.price));
-    return {configured:true,results,error:null};
+
+    await loginGeneric(page, source, cfg, password);
+
+    const searchUrl = cfg.search_url_template ? fillTemplate(cfg.search_url_template, search) : '';
+    if (searchUrl) await page.goto(searchUrl,{waitUntil:'domcontentloaded',timeout:30000});
+    else await navigateGenericSearch(page, search, cfg);
+
+    if (cfg.results_wait_for_selector) {
+      await page.locator(cfg.results_wait_for_selector).first().waitFor({state:'visible',timeout:Number(cfg.results_timeout_ms)||20000});
+    } else await page.waitForTimeout(Number(cfg.results_wait_ms) || 5000);
+
+    const rows = await extractGenericRates(page, cfg);
+    const results = rows.map((r,i)=>({
+      id:`${source.id}-${i}`,
+      supplier:source.name,
+      hotel:r.hotel||'Hotel',
+      room:r.room||'',
+      view:r.view||'',
+      board:r.board||search.board||'',
+      cancellation:r.cancellation||'',
+      price:Number.isFinite(r.price)?r.price:number(r.price),
+      currency:r.currency||cfg.default_currency||'',
+      availability:r.availability||'Available',
+      raw:r.raw||r
+    })).filter(r=>Number.isFinite(r.price) && r.price>0);
+
+    if (!results.length) throw new Error('Supplier returned no priced hotel rates');
+    return { configured:true, results, error:null };
   } catch(e) {
-    return {configured:true,results:[],error:e.name==='TimeoutError'?'Supplier browser timed out':e.message};
+    return { configured:true, results:[], error:e.name==='TimeoutError'?'Supplier browser timed out':e.message };
   } finally {
     if (context) await context.close().catch(()=>{});
     if (browser) await browser.close().catch(()=>{});
