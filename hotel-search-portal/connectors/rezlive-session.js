@@ -5,7 +5,9 @@ const path = require('path');
 const SESSION_DIR = path.join(__dirname, '..', '.rezlive-session');
 const STORAGE_PATH = path.join(SESSION_DIR, 'storage-state.json');
 const STATUS_PATH = path.join(SESSION_DIR, 'status.json');
-const LOGIN_URL = 'https://www.rezlive.com/common/index';
+const REZLIVE_HOME = 'https://www.rezlive.com/common/index';
+const CHROME_USER_DATA = process.env.REZLIVE_CHROME_USER_DATA || path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'User Data');
+const CHROME_PROFILE = process.env.REZLIVE_CHROME_PROFILE || 'Default';
 let activeLogin = null;
 
 function ensureDir() {
@@ -28,34 +30,45 @@ async function connectRezLive() {
   ensureDir();
   writeStatus('connecting');
   activeLogin = (async () => {
-    let browser = null;
+    let context = null;
     try {
-      browser = await chromium.launch({ headless: false });
-      const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-      const page = await context.newPage();
-      await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      console.log(`RezLive browser opened at ${LOGIN_URL}. Complete the Agent Login manually.`);
-      console.log('After successful login, the authenticated session will be saved automatically.');
+      if (!fs.existsSync(CHROME_USER_DATA)) {
+        throw new Error(`Chrome user-data directory not found: ${CHROME_USER_DATA}`);
+      }
 
-      const deadline = Date.now() + 5 * 60 * 1000;
+      console.log('Using your existing Chrome profile so RezLive can reuse its existing login session.');
+      console.log('IMPORTANT: close ALL normal Chrome windows before continuing.');
+      console.log(`Chrome profile: ${CHROME_PROFILE}`);
+
+      context = await chromium.launchPersistentContext(CHROME_USER_DATA, {
+        channel: 'chrome',
+        headless: false,
+        viewport: { width: 1440, height: 1000 },
+        args: [`--profile-directory=${CHROME_PROFILE}`]
+      });
+      const page = context.pages()[0] || await context.newPage();
+      await page.goto(REZLIVE_HOME, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      console.log('RezLive opened. If you are already logged in, it should go directly to the hotel search.');
+      console.log('If RezLive asks for a new authenticator code, stop here and tell me; do not enter or share the code.');
+
+      const deadline = Date.now() + 3 * 60 * 1000;
       while (Date.now() < deadline) {
-        if (page.isClosed()) throw new Error('RezLive login browser was closed before authentication completed.');
-        if (!page.url().includes('/common/index')) {
+        if (page.isClosed()) throw new Error('RezLive browser was closed before the session could be saved.');
+        const url = page.url();
+        if (!url.includes('/login')) {
           await context.storageState({ path: STORAGE_PATH });
           writeStatus('connected');
           await context.close().catch(() => {});
-          await browser.close().catch(() => {});
           return { ok: true, status: 'connected' };
         }
         await page.waitForTimeout(1000);
       }
-      writeStatus('error', 'RezLive login timed out.');
+      writeStatus('error', 'RezLive session was not authenticated within 3 minutes.');
       await context.close().catch(() => {});
-      await browser.close().catch(() => {});
-      return { ok: false, status: 'error', error: 'RezLive login timed out.' };
+      return { ok: false, status: 'error', error: 'RezLive session was not authenticated within 3 minutes.' };
     } catch (e) {
       writeStatus('error', e.message);
-      if (browser) await browser.close().catch(() => {});
+      if (context) await context.close().catch(() => {});
       return { ok: false, status: 'error', error: e.message };
     } finally {
       activeLogin = null;
@@ -89,4 +102,4 @@ async function withRezLiveSession(fn) {
   }
 }
 
-module.exports = { connectRezLive, hasRezLiveSession, getRezLiveSessionStatus, withRezLiveSession, STORAGE_PATH, LOGIN_URL };
+module.exports = { connectRezLive, hasRezLiveSession, getRezLiveSessionStatus, withRezLiveSession, STORAGE_PATH };
