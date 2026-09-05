@@ -5,6 +5,7 @@ const path = require('path');
 const SESSION_DIR = path.join(__dirname, '..', '.rezlive-session');
 const STORAGE_PATH = path.join(SESSION_DIR, 'storage-state.json');
 const STATUS_PATH = path.join(SESSION_DIR, 'status.json');
+const LOGIN_URL = 'https://www.rezlive.com/common/index';
 let activeLogin = null;
 
 function ensureDir() {
@@ -32,13 +33,14 @@ async function connectRezLive() {
       browser = await chromium.launch({ headless: false });
       const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
       const page = await context.newPage();
-      await page.goto('https://extranet.rezlive.com/login', { waitUntil: 'domcontentloaded', timeout: 30000 });
-      console.log('RezLive browser opened. Complete the login and security CAPTCHA manually.');
+      await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      console.log(`RezLive browser opened at ${LOGIN_URL}. Complete the Agent Login manually.`);
+      console.log('After successful login, the authenticated session will be saved automatically.');
 
       const deadline = Date.now() + 5 * 60 * 1000;
       while (Date.now() < deadline) {
         if (page.isClosed()) throw new Error('RezLive login browser was closed before authentication completed.');
-        if (!page.url().includes('/login')) {
+        if (!page.url().includes('/common/index')) {
           await context.storageState({ path: STORAGE_PATH });
           writeStatus('connected');
           await context.close().catch(() => {});
@@ -87,4 +89,4 @@ async function withRezLiveSession(fn) {
   }
 }
 
-module.exports = { connectRezLive, hasRezLiveSession, getRezLiveSessionStatus, withRezLiveSession, STORAGE_PATH };
+module.exports = { connectRezLive, hasRezLiveSession, getRezLiveSessionStatus, withRezLiveSession, STORAGE_PATH, LOGIN_URL };
