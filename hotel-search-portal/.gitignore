@@ -8,3 +8,4 @@ portal.db
 *.sqlite
 *.sqlite3
 coverage/
+.rezlive-session/
