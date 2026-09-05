@@ -9,8 +9,41 @@ async function fillFirst(page, selectors, value) {
   for (const selector of selectors) {
     const locator = page.locator(selector).first();
     if (await locator.count().catch(() => 0)) {
-      try { await locator.fill(String(value)); return true; } catch {}
+      try {
+        if (await locator.isVisible().catch(() => false)) {
+          await locator.fill(String(value));
+          return true;
+        }
+      } catch {}
     }
+  }
+  return false;
+}
+
+async function fillLoginIdentifier(page, value) {
+  const semantic = [
+    'input[type="email"]',
+    'input[name="email"]',
+    'input[name*="email" i]',
+    'input[id*="email" i]',
+    'input[placeholder*="email" i]',
+    'input[aria-label*="email" i]',
+    'input[name*="username" i]',
+    'input[id*="username" i]',
+    'input[placeholder*="username" i]',
+    'input[aria-label*="username" i]'
+  ];
+  if (await fillFirst(page, semantic, value)) return true;
+
+  // RateLoc may render the email field as a plain text input with no semantic attributes.
+  const candidates = page.locator('input:not([type="hidden"]):not([type="password"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):not([readonly])');
+  const count = await candidates.count().catch(() => 0);
+  for (let i = 0; i < count; i++) {
+    const loc = candidates.nth(i);
+    if (!await loc.isVisible().catch(() => false)) continue;
+    const meta = `${await loc.getAttribute('name').catch(() => '')} ${await loc.getAttribute('id').catch(() => '')} ${await loc.getAttribute('placeholder').catch(() => '')} ${await loc.getAttribute('aria-label').catch(() => '')}`.toLowerCase();
+    if (/(search|location|destination|hotel name|area)/.test(meta)) continue;
+    try { await loc.fill(String(value)); return true; } catch {}
   }
   return false;
 }
@@ -19,7 +52,12 @@ async function clickFirst(page, selectors) {
   for (const selector of selectors) {
     const locator = page.locator(selector).first();
     if (await locator.count().catch(() => 0)) {
-      try { await locator.click(); return true; } catch {}
+      try {
+        if (await locator.isVisible().catch(() => false)) {
+          await locator.click();
+          return true;
+        }
+      } catch {}
     }
   }
   return false;
@@ -180,16 +218,14 @@ async function searchRateLocSource(source, search) {
     const page = await context.newPage();
     page.setDefaultTimeout(15000);
     await page.goto(source.login_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    if (!await fillFirst(page, ['input[type="email"]','input[name="email"]','input[placeholder*="email" i]'], source.site_username)) throw new Error('RateLoc email field could not be detected');
-    if (!await fillFirst(page, ['input[type="password"]','input[name="password"]'], password)) throw new Error('RateLoc password field could not be detected');
+    if (!await fillLoginIdentifier(page, source.site_username)) throw new Error('RateLoc email field could not be detected');
+    if (!await fillFirst(page, ['input[type="password"]','input[name="password"]','input[id*="password" i]'], password)) throw new Error('RateLoc password field could not be detected');
     if (!await clickFirst(page, ['button:has-text("LOGIN")','button:has-text("Log in")','button:has-text("Login")','input[type="submit"]'])) throw new Error('RateLoc login button could not be detected');
     await page.waitForLoadState('domcontentloaded').catch(() => {});
     await page.waitForTimeout(2500);
     const bodyText = clean(await page.locator('body').innerText().catch(() => ''));
     if (/invalid password|invalid credentials|incorrect password|login failed/i.test(bodyText)) throw new Error('RateLoc login was rejected');
-    if (!await fillFirst(page, ['input[placeholder="Search"]','input[placeholder*="hotel name or area" i]','input[placeholder*="search for a hotel" i]','input[placeholder*="location" i]','input[name*="location" i]','input[name*="destination" i]','input[id*="location" i]','input[id*="destination" i]'], search.destination)) {
-      throw new Error('RateLoc location field could not be detected');
-    }
+    if (!await fillFirst(page, ['input[placeholder="Search"]','input[placeholder*="hotel name or area" i]','input[placeholder*="search for a hotel" i]','input[placeholder*="location" i]','input[name*="location" i]','input[name*="destination" i]','input[id*="location" i]','input[id*="destination" i]'], search.destination)) throw new Error('RateLoc location field could not be detected');
     await page.waitForTimeout(400);
     await setDateRange(page, search.checkin, search.checkout);
     await setPassengers(page, search.guests, search.rooms || 1);
