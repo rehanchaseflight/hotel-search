@@ -9,6 +9,8 @@ const REZLIVE_HOME = 'https://www.rezlive.com/common/index';
 const CHROME_USER_DATA = process.env.REZLIVE_CHROME_USER_DATA || path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'User Data');
 const CHROME_PROFILE = process.env.REZLIVE_CHROME_PROFILE || 'Profile 2';
 const CHROME_DISPLAY_NAME = 'Chaseflight';
+const CLONE_DIR = path.join(SESSION_DIR, 'chrome-user-data');
+const CLONE_PROFILE = CHROME_PROFILE;
 let activeLogin = null;
 
 function ensureDir() {
@@ -26,6 +28,25 @@ function readStatus() {
   catch { return { status: 'not_connected', error: null }; }
 }
 
+function cloneChromeSession() {
+  if (!fs.existsSync(CHROME_USER_DATA)) throw new Error(`Chrome user-data directory not found: ${CHROME_USER_DATA}`);
+  const sourceProfile = path.join(CHROME_USER_DATA, CHROME_PROFILE);
+  if (!fs.existsSync(sourceProfile)) throw new Error(`Chrome profile not found: ${sourceProfile}`);
+
+  fs.mkdirSync(CLONE_DIR, { recursive: true });
+  const localStateSrc = path.join(CHROME_USER_DATA, 'Local State');
+  const localStateDst = path.join(CLONE_DIR, 'Local State');
+  if (fs.existsSync(localStateSrc)) fs.copyFileSync(localStateSrc, localStateDst);
+
+  const destProfile = path.join(CLONE_DIR, CLONE_PROFILE);
+  if (fs.existsSync(destProfile)) fs.rmSync(destProfile, { recursive: true, force: true });
+
+  fs.cpSync(sourceProfile, destProfile, {
+    recursive: true,
+    filter: source => !/\\(Cache|Code Cache|GPUCache|GrShaderCache|DawnCache|Service Worker\\CacheStorage)$/.test(source)
+  });
+}
+
 async function connectRezLive() {
   if (activeLogin) return { ok: true, status: 'already_connecting' };
   ensureDir();
@@ -33,24 +54,26 @@ async function connectRezLive() {
   activeLogin = (async () => {
     let context = null;
     try {
-      if (!fs.existsSync(CHROME_USER_DATA)) throw new Error(`Chrome user-data directory not found: ${CHROME_USER_DATA}`);
       console.log(`Using Chrome profile '${CHROME_DISPLAY_NAME}' (${CHROME_PROFILE}).`);
-      console.log('IMPORTANT: close ALL normal Chrome windows before continuing.');
+      console.log('Close ALL normal Chrome windows before continuing.');
+      console.log('Creating a private automation copy of the Chaseflight profile...');
+      cloneChromeSession();
 
-      context = await chromium.launchPersistentContext(CHROME_USER_DATA, {
+      context = await chromium.launchPersistentContext(CLONE_DIR, {
         channel: 'chrome',
         headless: false,
         viewport: { width: 1440, height: 1000 },
-        args: [`--profile-directory=${CHROME_PROFILE}`, '--no-first-run', '--no-default-browser-check']
+        args: [`--profile-directory=${CLONE_PROFILE}`, '--no-first-run', '--no-default-browser-check']
       });
 
-      for (const p of context.pages()) await p.close().catch(() => {});
+      const pages = context.pages();
+      for (const p of pages) await p.close().catch(() => {});
       const page = await context.newPage();
       page.setDefaultTimeout(15000);
       console.log('Opening RezLive Agent Login...');
       await page.goto(REZLIVE_HOME, { waitUntil: 'domcontentloaded', timeout: 30000 });
       console.log(`RezLive URL: ${page.url()}`);
-      console.log('If your Chaseflight RezLive session is valid, you should see the authenticated hotel area.');
+      console.log('The copied Chaseflight session will be tested here.');
       console.log('Do not enter or share a new authenticator code.');
 
       const deadline = Date.now() + 3 * 60 * 1000;
@@ -64,9 +87,9 @@ async function connectRezLive() {
         }
         await page.waitForTimeout(1000);
       }
-      writeStatus('error', 'RezLive session was not authenticated within 3 minutes.');
+      writeStatus('error', 'The copied Chaseflight session is not authenticated with RezLive.');
       await context.close().catch(() => {});
-      return { ok: false, status: 'error', error: 'RezLive session was not authenticated within 3 minutes.' };
+      return { ok: false, status: 'error', error: 'The copied Chaseflight session is not authenticated with RezLive.' };
     } catch (e) {
       writeStatus('error', e.message);
       if (context) await context.close().catch(() => {});
