@@ -65,7 +65,9 @@ async function login(page,source,password,cfg) {
     f=await frameWith(page,'#tbUserName');
     if(!f){
       const iframe=await page.locator('iframe[src*="login.aspx" i], iframe[src*="iolcloud" i]').first();
-      if(await iframe.count().catch(()=>0)) f=await iframe.contentFrame().catch(()=>null);
+      if(await iframe.count().catch(()=>0)) {
+        try { f=iframe.contentFrame(); } catch { f=null; }
+      }
     }
     if(!f) await page.waitForTimeout(500);
   }
