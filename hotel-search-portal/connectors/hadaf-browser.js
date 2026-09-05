@@ -58,14 +58,29 @@ async function blocked(page) {
   if(/captcha|verify you are human|access denied|unusual traffic|security check/i.test(body)) throw new Error('Supplier presented a security verification step; automated bypass is not supported');
 }
 async function login(page,source,password,cfg) {
-  const started=Date.now(), waitMs=Number(cfg.login_frame_timeout_ms)||15000;
-  let f=null; while(!f && Date.now()-started<waitMs){ f=await frameWith(page,'#tbUserName'); if(!f) await page.waitForTimeout(400); }
-  if(!f) throw new Error('Hadaf login iframe could not be detected');
+  const waitMs=Number(cfg.login_frame_timeout_ms)||30000;
+  const started=Date.now();
+  let f=null;
+  while(!f && Date.now()-started<waitMs){
+    f=await frameWith(page,'#tbUserName');
+    if(!f){
+      const iframe=await page.locator('iframe[src*="login.aspx" i], iframe[src*="iolcloud" i]').first();
+      if(await iframe.count().catch(()=>0)) f=await iframe.contentFrame().catch(()=>null);
+    }
+    if(!f) await page.waitForTimeout(500);
+  }
+  if(!f){
+    const body=clean(await page.locator('body').innerText().catch(()=>''));
+    if(/welcome|logout/i.test(body)) return;
+    throw new Error('Hadaf login iframe could not be detected');
+  }
   const user=await visible(f,'#tbUserName'), pass=await visible(f,'#tbPassword'), terms=await visible(f,'#chkTermCondn'), btn=await visible(f,'#btnLogin1');
   if(!user||!pass||!btn) throw new Error('Hadaf login fields could not be detected');
   await user.fill(String(source.site_username||'')); await pass.fill(String(password||''));
   if(terms && !(await terms.isChecked().catch(()=>false))) await terms.check().catch(()=>{});
-  await btn.click({timeout:10000}); await page.waitForTimeout(Number(cfg.post_login_wait_ms)||5000); await blocked(page);
+  await btn.click({timeout:10000});
+  await page.waitForTimeout(Number(cfg.post_login_wait_ms)||5000);
+  await blocked(page);
 }
 async function searchPortal(page,s,cfg) {
   if(cfg.search_url_template){
@@ -104,7 +119,7 @@ async function extract(page,cfg) {
           if(x && x.length<180 && !/hotel search|room type|price|status|non-refundable|available/i.test(x)) pool.push(x);
         }
         if(pool.length){ hotel=pool[pool.length-1]; break; }
-        let p=row.previousElementSibling, steps=0;
+        let p=row.previousElementSibling; let steps=0;
         while(p&&steps++<12){ const x=String(p.innerText||p.textContent||'').replace(/\s+/g,' ').trim(); if(x&&x.length<180&&!PRICE_RE.test(x)&&/makkah|hotel|resort|suites|residence/i.test(x)){hotel=x;break;} p=p.previousElementSibling; }
         if(hotel) break;
       }
@@ -136,12 +151,9 @@ async function searchHadafSource(source,search) {
     await page.goto(source.login_url,{waitUntil:'domcontentloaded',timeout:30000}); await login(page,source,password,cfg); await searchPortal(page,search,cfg);
     await page.waitForTimeout(Number(cfg.results_wait_ms)||10000);
     await blocked(page);
-    const pages=[...context.pages()];
-    const all=[];
-    for(const p of pages){
-      try{ await blocked(p); const rows=await extract(p,cfg); all.push(...rows); }catch{}
-    }
-    const rows=all; const results=rows.map((r,i)=>({id:`${source.id}-${i}`,supplier:source.name,hotel:r.hotel||'Hotel',room:r.room||'',view:r.view||'',board:r.board||search.board||'',cancellation:r.cancellation||'',price:Number(r.price),currency:r.currency||cfg.default_currency||'AED',availability:r.availability||'Available',raw:r.raw||r,image:'',bookingUrl:''}));
+    const pages=[...context.pages()]; const all=[];
+    for(const p of pages){try{await blocked(p);const rows=await extract(p,cfg);all.push(...rows);}catch{}}
+    const results=all.map((r,i)=>({id:`${source.id}-${i}`,supplier:source.name,hotel:r.hotel||'Hotel',room:r.room||'',view:r.view||'',board:r.board||search.board||'',cancellation:r.cancellation||'',price:Number(r.price),currency:r.currency||cfg.default_currency||'AED',availability:r.availability||'Available',raw:r.raw||r,image:'',bookingUrl:''}));
     if(!results.length)return{configured:true,results:[],error:'Hadaf login/search completed but no priced rates were extracted'};
     return{configured:true,results,error:null};
   }catch(e){return{configured:true,results:[],error:e.name==='TimeoutError'?'Hadaf browser timed out':e.message};}
