@@ -115,7 +115,7 @@ async function fillField(page, purpose, value, selectors) {
   if (!ranked) return false;
   try { await ranked.el.fill(String(value)); await ranked.el.press('Tab').catch(() => {}); return true; } catch { return false; }
 }
-async function search(page, search, cfg) {
+async function performSearch(page, search, cfg) {
   if (cfg.search_url_template) {
     const url = String(cfg.search_url_template)
       .replaceAll('{destination}', encodeURIComponent(search.destination))
@@ -186,7 +186,7 @@ async function searchHadafSource(source, search) {
     page.setDefaultTimeout(Number(cfg.timeout_ms) || 15000);
     await page.goto(source.login_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await login(page, source, password, cfg);
-    await search(page, search, cfg);
+    await performSearch(page, search, cfg);
     if (cfg.results_wait_for_selector) {
       const r = await findInFrames(page, [cfg.results_wait_for_selector]);
       if (r) await r.waitFor({ state: 'visible', timeout: Number(cfg.results_timeout_ms) || 20000 });
