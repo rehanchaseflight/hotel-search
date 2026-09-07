@@ -5,14 +5,14 @@ const SEARCH_PAGE = 'https://iolglobalb2bcloudssl.iolcloud.com/HotelSearch.aspx?
 const PRICE_RE = /(?:AED|SAR|USD|EUR|GBP|PKR|US\$|\$)\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?|\b[0-9]{2,6}\.[0-9]{2}\b/i;
 const BOARDS = /Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive/i;
 const clean = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
-const norm = (v) => clean(v).toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+const norm = (v) => clean(v).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const date = (v) => { const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : String(v || ''); };
-function escapeRegex(v) { return String(v).replace(/[.*+?^${}()|[\\]\\]/g, '\\$&'); }
-function parseDisplayedPrice(text, def = 'AED') { const m = clean(text).match(PRICE_RE); if (!m) return null; const q = m[0].replace(/,/g, '').match(/[0-9]+(?:\.[0-9]{1,2})?/); if (!q) return null; const n = Number(q[0]); if (!(n > 0)) return null; const cm = m[0].match(/AED|SAR|USD|EUR|GBP|PKR|US\$|\$/i); return { price: n, currency: cm ? cm[0] : def }; }
+function escapeRegex(v) { return String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function parseDisplayedPrice(text, def = 'AED') { const m = clean(text).match(PRICE_RE); if (!m) return null; const q = m[0].replace(/,/g, '').match(/[0-9]+(?:\.[0-9]{1,2})?/); if (!q) return null; const n = Number(q[0]); if (!(n > 0)) return null; const cm = m[0].match(/AED|SAR|USD|EUR|GBP|PKR|US\$|\$/i); return { price: n, currency: cm ? cm[0].toUpperCase() : def }; }
 function board(text) { return clean((clean(text).match(BOARDS) || [''])[0]); }
 function cancel(text) { return clean((clean(text).match(/Non[- ]?refundable|Free Cancellation|Refundable/i) || [''])[0]); }
 function parseRoom(text) { let x = clean(text).replace(/^.*?Pax:\s*\d+A\d+C\s*/i, '').replace(/\s+(?:Non[- ]?refundable|Free Cancellation|Refundable|Package Rate|Show All Room Types|Live Search Results)\b.*$/i, ''); const m = x.match(/^(.+?)\s*-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)\b/i); return clean(m ? m[1] : x); }
-function dedupe(rows) { const seen = new Set(); return rows.filter((r) => { const key = [r.hotel,r.room,r.board,r.cancellation,r.price,r.currency].join('|'); if (seen.has(key)) return false; seen.add(key); return true; }); }
+function dedupe(rows) { const seen = new Set(); return rows.filter((r) => { const key = [norm(r.hotel), norm(r.room), norm(r.board), norm(r.cancellation), Number(r.price).toFixed(2), norm(r.currency)].join('|'); if (seen.has(key)) return false; seen.add(key); return true; }); }
 async function bodyText(frame) { return clean(await frame.locator('body').innerText().catch(() => '')); }
 async function blocked(page) { for (const frame of page.frames()) { if (/captcha|verify you are human|access denied|unusual traffic|security check/i.test(await bodyText(frame))) throw new Error('Supplier presented a security verification step; automated bypass is not supported'); } }
 async function findLoginFrame(page) { for (const frame of page.frames()) { if (await frame.locator('#tbUserName').count().catch(() => 0)) return frame; } return null; }
