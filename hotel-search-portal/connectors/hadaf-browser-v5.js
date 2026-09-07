@@ -21,7 +21,7 @@ async function searchForm(page) { const end = Date.now() + 30000; while (Date.no
 async function chooseDestination(frame, value) { const input = frame.locator('#lpPannel_txtV5City').first(); await input.fill(clean(value)); await frame.waitForTimeout(1200); const pattern = new RegExp(escapeRegex(clean(value)), 'i'); const options = frame.locator('li:visible, [role="option"]:visible').filter({ hasText: pattern }); if (await options.count()) await options.first().click().catch(() => {}); else { await input.press('ArrowDown').catch(() => {}); await input.press('Enter').catch(() => {}); } await frame.waitForTimeout(500); }
 async function fillSearch(frame, search) { const nationality = frame.locator('#lpPannel_sel_nationality'); if (await nationality.count()) await nationality.selectOption({ label: String(search.country || 'United States of America') }).catch(() => {}); await chooseDestination(frame, search.destination); await frame.locator('#lpPannel_txtFromDate').fill(date(search.checkin)); await frame.locator('#lpPannel_txtToDate').fill(date(search.checkout)); await frame.locator('#lpPannel_txtNights').fill(String(Math.max(1, Number(search.nights || 1)))); await frame.locator('#sel_NoOfRooms').selectOption(String(search.rooms || 1)).catch(() => {}); await frame.locator('#sel_NoOfAdult_1').selectOption(String(search.guests || 2)).catch(() => {}); await frame.locator('#sel_NoOfChild_1').selectOption(String(search.children ?? 0)).catch(() => {}); if (search.hotel_name) { const hotel = frame.locator('#lpPannel_txtHotel').first(); if (await hotel.count()) { const name = String(search.hotel_name); await hotel.evaluate((el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }, name).catch(() => {}); } } }
 async function clickSearch(frame) { const searchLink = frame.locator('a#lpPannel_btnModifySearch').first(); if (!await searchLink.count()) throw new Error('Hadaf search button not found'); await searchLink.click({ timeout: 10000, noWaitAfter: true }); }
-function flattenJson(value, out = []) { if (Array.isArray(value)) { value.forEach((item) => flattenJson(item, out)); return out; } if (!value || typeof value !== 'object') return out; if (value.n && value.rlst) for (const group of value.rlst || []) for (const rate of group.rdlst || []) out.push({ hotel: clean(value.n), room: clean(rate.rt), board: clean(rate.mp), cancellation: '', supplierRoomCode: clean(rate.ThirdPartyRoomCode), rateFrom: clean(rate.fd), rateTo: clean(rate.td) }); for (const key of Object.keys(value)) if (key !== 'rlst') flattenJson(value[key], out); return out; }
+function flattenJson(value, out = []) { if (Array.isArray(value)) { value.forEach((item) => flattenJson(item, out)); return out; } if (!value || typeof value !== 'object') return out; if (value.n && value.rlst) for (const group of value.rlst || []) for (const rate of group.rdlst || []) out.push({ hotel: clean(value.n), room: clean(rate.rt), board: clean(rate.mp), supplierRoomCode: clean(rate.ThirdPartyRoomCode), rateFrom: clean(rate.fd), rateTo: clean(rate.td) }); for (const key of Object.keys(value)) if (key !== 'rlst') flattenJson(value[key], out); return out; }
 function captureJson(context, state) { context.on('response', async (response) => { try { if (/GetHotelsJson\.aspx/i.test(response.url()) && response.status() === 200) { state.json = flattenJson(JSON.parse(await response.text()), []); state.jsonResponse = true; } } catch (_) {} }); }
 function matchJson(state, room, boardName, hotel) { if (!room && !boardName && !hotel) return null; let best = null; let score = -1; for (const item of state.json || []) { let value = 0; if (hotel && norm(item.hotel) === norm(hotel)) value += 20; if (room && norm(item.room) === norm(room)) value += 10; else if (room && (norm(item.room).includes(norm(room)) || norm(room).includes(norm(item.room)))) value += 6; if (boardName && norm(item.board) === norm(boardName)) value += 8; if (value > score) { score = value; best = item; } } return score > 0 ? best : null; }
 function makeRate(search, best, room, boardName, price, cancellation = '') { return { hotel: search.hotel_name || best?.hotel || '', room, view: '', board: boardName, cancellation, price: price.price, currency: price.currency, availability: 'Available', supplier: 'Hadaf Holidays', supplierRoomCode: best?.supplierRoomCode || '', rateFrom: best?.rateFrom || '', rateTo: best?.rateTo || '' }; }
@@ -35,37 +35,42 @@ async function extractRendered(context, cfg, search, state) {
     for (let i = 0; i < count; i++) {
       const link = links.nth(i);
       const info = await link.evaluate((el) => {
-        const priceRe = /(?:AED|SAR|USD|EUR|GBP|PKR|US\$|\$)\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?|\b[0-9]{2,6}\.[0-9]{2}\b/ig;
         const textOf = (n) => (n?.innerText || '').replace(/\s+/g, ' ').trim();
-        const attrText = (n) => { if (!n || !n.getAttribute) return ''; return [n.getAttribute('alt'), n.getAttribute('title'), n.getAttribute('src'), n.getAttribute('href')].filter(Boolean).join(' '); };
-        const candidates = [];
+        const priceRe = /(?:AED|SAR|USD|EUR|GBP|PKR|US\$|\$)\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?|\b[0-9]{2,6}\.[0-9]{2}\b/ig;
+        const boardRe = /Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive/i;
+        const cancelRe = /Non[- ]?refundable|Free Cancellation|Refundable/i;
+        let row = el.closest ? el.closest('tr') : null;
+        if (row) {
+          const rowText = textOf(row);
+          const prices = rowText.match(priceRe) || [];
+          const rowLinks = row.querySelectorAll ? row.querySelectorAll('a[href*="RatePopup"]').length : 0;
+          if (prices.length === 1 && rowLinks === 1) {
+            const cells = Array.from(row.querySelectorAll('td,th')).map(textOf).filter(Boolean);
+            let room = '';
+            for (const cell of cells) {
+              if (/\s-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)\b/i.test(cell)) { room = cell.replace(/^.*?Pax:\s*\d+A\d+C\s*/i, '').match(/^(.+?)\s*-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)\b/i)?.[1] || ''; break; }
+            }
+            return { text: rowText, room: room.trim(), board: rowText.match(boardRe)?.[0] || '', cancellation: rowText.match(cancelRe)?.[0] || '' };
+          }
+        }
         let node = el;
-        for (let depth = 0; node && depth < 10; depth++, node = node.parentElement) {
+        let chosen = '';
+        for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
           const text = textOf(node);
           const prices = text.match(priceRe) || [];
-          if (text) candidates.push(text);
-          if (node.previousElementSibling) candidates.push(textOf(node.previousElementSibling));
-          if (node.previousElementSibling?.previousElementSibling) candidates.push(textOf(node.previousElementSibling.previousElementSibling));
-          if (node.parentElement?.previousElementSibling) candidates.push(textOf(node.parentElement.previousElementSibling));
-          if (node.parentElement?.previousElementSibling?.previousElementSibling) candidates.push(textOf(node.parentElement.previousElementSibling.previousElementSibling));
-          const attrs = attrText(node) + ' ' + Array.from(node.querySelectorAll ? node.querySelectorAll('img,a,span') : []).map(attrText).join(' ');
-          if (prices.length === 1) candidates.push(`${text} ${attrs}`.trim());
+          const rateLinks = node.querySelectorAll ? node.querySelectorAll('a[href*="RatePopup"]').length : 0;
+          if (prices.length === 1 && rateLinks === 1 && text.length < 700) { chosen = text; break; }
         }
-        return { anchor: textOf(el), candidates: candidates.filter(Boolean) };
-      }).catch(() => ({ anchor: '', candidates: [] }));
+        const fallback = textOf(el.parentElement || el);
+        const text = chosen || fallback;
+        return { text, room: '', board: text.match(boardRe)?.[0] || '', cancellation: text.match(cancelRe)?.[0] || '' };
+      }).catch(() => ({ text: '', room: '', board: '', cancellation: '' }));
 
-      const price = parseDisplayedPrice(info.anchor);
+      const price = parseDisplayedPrice(info.text || '');
       if (!price) continue;
-
-      let room = '';
-      let boardName = '';
-      let cancellation = '';
-      for (const candidate of info.candidates || []) {
-        if (!boardName) boardName = board(candidate);
-        if (!cancellation) cancellation = cancel(candidate);
-        if (!room && /\s-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)\b/i.test(candidate)) room = parseRoom(candidate);
-      }
-
+      let room = clean(info.room) || parseRoom(info.text);
+      let boardName = clean(info.board);
+      let cancellation = clean(info.cancellation);
       const best = matchJson(state, room, boardName, search.hotel_name || '');
       if (!room && best) room = best.room;
       if (!boardName && best) boardName = best.board;
@@ -98,6 +103,5 @@ async function searchHadafSource(source, search) {
   } catch (error) { return { configured: true, results: [], error: error.message || String(error) }; }
   finally { try { if (context) await context.close(); } catch (_) {} try { if (browser) await browser.close(); } catch (_) {} }
 }
-
 async function healthHadafSource(source) { try { const r = await searchHadafSource(source, { destination: 'Madinah - Saudi Arabia', checkin: '2026-10-02', checkout: '2026-10-03', nights: 1, rooms: 1, guests: 2, children: 0 }); return { configured: r.configured, live: !r.error && r.results.length > 0, error: r.error || null }; } catch (error) { return { configured: true, live: false, error: error.message || String(error) }; } }
 module.exports = { searchHadafSource, healthHadafSource };
