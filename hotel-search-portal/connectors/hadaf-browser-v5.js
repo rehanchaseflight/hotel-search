@@ -21,10 +21,10 @@ async function searchForm(page) { const end = Date.now() + 30000; while (Date.no
 async function chooseDestination(frame, value) { const input = frame.locator('#lpPannel_txtV5City').first(); await input.fill(clean(value)); await frame.waitForTimeout(1200); const pattern = new RegExp(escapeRegex(clean(value)), 'i'); const options = frame.locator('li:visible, [role="option"]:visible').filter({ hasText: pattern }); if (await options.count()) await options.first().click().catch(() => {}); else { await input.press('ArrowDown').catch(() => {}); await input.press('Enter').catch(() => {}); } await frame.waitForTimeout(500); }
 async function fillSearch(frame, search) { const nationality = frame.locator('#lpPannel_sel_nationality'); if (await nationality.count()) await nationality.selectOption({ label: String(search.country || 'United States of America') }).catch(() => {}); await chooseDestination(frame, search.destination); await frame.locator('#lpPannel_txtFromDate').fill(date(search.checkin)); await frame.locator('#lpPannel_txtToDate').fill(date(search.checkout)); await frame.locator('#lpPannel_txtNights').fill(String(Math.max(1, Number(search.nights || 1)))); await frame.locator('#sel_NoOfRooms').selectOption(String(search.rooms || 1)).catch(() => {}); await frame.locator('#sel_NoOfAdult_1').selectOption(String(search.guests || 2)).catch(() => {}); await frame.locator('#sel_NoOfChild_1').selectOption(String(search.children ?? 0)).catch(() => {}); if (search.hotel_name) { const hotel = frame.locator('#lpPannel_txtHotel').first(); if (await hotel.count()) { const name = String(search.hotel_name); await hotel.evaluate((el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }, name).catch(() => {}); } } }
 async function clickSearch(frame) { const searchLink = frame.locator('a#lpPannel_btnModifySearch').first(); if (!await searchLink.count()) throw new Error('Hadaf search button not found'); await searchLink.click({ timeout: 10000, noWaitAfter: true }); }
-function flattenJson(value, out = []) { if (Array.isArray(value)) { value.forEach((item) => flattenJson(item, out)); return out; } if (!value || typeof value !== 'object') return out; if (value.n && value.rlst) for (const group of value.rlst || []) for (const rate of group.rdlst || []) out.push({ hotel: clean(value.n), room: clean(rate.rt), board: clean(rate.mp), cancellation: /^(N)$/i.test(String(rate.p || '')) || /^(N)$/i.test(String(rate.bo || '')) ? 'Non-refundable' : '', supplierRoomCode: clean(rate.ThirdPartyRoomCode), rateFrom: clean(rate.fd), rateTo: clean(rate.td) }); for (const key of Object.keys(value)) if (key !== 'rlst') flattenJson(value[key], out); return out; }
+function flattenJson(value, out = []) { if (Array.isArray(value)) { value.forEach((item) => flattenJson(item, out)); return out; } if (!value || typeof value !== 'object') return out; if (value.n && value.rlst) for (const group of value.rlst || []) for (const rate of group.rdlst || []) out.push({ hotel: clean(value.n), room: clean(rate.rt), board: clean(rate.mp), cancellation: '', supplierRoomCode: clean(rate.ThirdPartyRoomCode), rateFrom: clean(rate.fd), rateTo: clean(rate.td) }); for (const key of Object.keys(value)) if (key !== 'rlst') flattenJson(value[key], out); return out; }
 function captureJson(context, state) { context.on('response', async (response) => { try { if (/GetHotelsJson\.aspx/i.test(response.url()) && response.status() === 200) { state.json = flattenJson(JSON.parse(await response.text()), []); state.jsonResponse = true; } } catch (_) {} }); }
 function matchJson(state, room, boardName, hotel) { if (!room && !boardName && !hotel) return null; let best = null; let score = -1; for (const item of state.json || []) { let value = 0; if (hotel && norm(item.hotel) === norm(hotel)) value += 20; if (room && norm(item.room) === norm(room)) value += 10; else if (room && (norm(item.room).includes(norm(room)) || norm(room).includes(norm(item.room)))) value += 6; if (boardName && norm(item.board) === norm(boardName)) value += 8; if (value > score) { score = value; best = item; } } return score > 0 ? best : null; }
-function makeRate(search, best, room, boardName, price, context, cancellationOverride = '') { return { hotel: search.hotel_name || best?.hotel || '', room, view: '', board: boardName, cancellation: cancellationOverride || best?.cancellation || '', price: price.price, currency: price.currency, availability: 'Available', supplier: 'Hadaf Holidays', supplierRoomCode: best?.supplierRoomCode || '', rateFrom: best?.rateFrom || '', rateTo: best?.rateTo || '' }; }
+function makeRate(search, best, room, boardName, price, cancellation = '') { return { hotel: search.hotel_name || best?.hotel || '', room, view: '', board: boardName, cancellation, price: price.price, currency: price.currency, availability: 'Available', supplier: 'Hadaf Holidays', supplierRoomCode: best?.supplierRoomCode || '', rateFrom: best?.rateFrom || '', rateTo: best?.rateTo || '' }; }
 async function expandRooms(context) { for (const page of context.pages()) for (const frame of page.frames()) { const locator = frame.getByText(/Show All Room Types/i); const count = await locator.count().catch(() => 0); for (let i = 0; i < count; i++) if (await locator.nth(i).isVisible().catch(() => false)) await locator.nth(i).click({ noWaitAfter: true, timeout: 3000 }).catch(() => {}); } }
 
 async function extractRendered(context, cfg, search, state) {
@@ -36,60 +36,44 @@ async function extractRendered(context, cfg, search, state) {
       const link = links.nth(i);
       const info = await link.evaluate((el) => {
         const priceRe = /(?:AED|SAR|USD|EUR|GBP|PKR|US\$|\$)\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?|\b[0-9]{2,6}\.[0-9]{2}\b/ig;
-        const boardRe = /Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive/i;
-        const cancelRe = /Non[- ]?refundable|Free Cancellation|Refundable/i;
         const textOf = (n) => (n?.innerText || '').replace(/\s+/g, ' ').trim();
+        const attrText = (n) => { if (!n || !n.getAttribute) return ''; return [n.getAttribute('alt'), n.getAttribute('title'), n.getAttribute('src'), n.getAttribute('href')].filter(Boolean).join(' '); };
         let node = el;
         let chosen = '';
-        let fallback = '';
+        let dom = '';
         for (let depth = 0; node && depth < 12; depth++, node = node.parentElement) {
           const text = textOf(node);
           const prices = text.match(priceRe) || [];
           const popupLinks = node.querySelectorAll ? node.querySelectorAll('a[href*="RatePopup"]').length : 0;
-          if (prices.length === 1 && popupLinks === 1 && boardRe.test(text) && text.length < 1200) { chosen = text; break; }
-          if (!fallback && prices.length === 1 && boardRe.test(text) && text.length < 1800) fallback = text;
+          const attrs = attrText(node) + ' ' + Array.from(node.querySelectorAll ? node.querySelectorAll('img,a,span') : []).map(attrText).join(' ');
+          if (text.length && prices.length === 1 && popupLinks === 1) { chosen = text; dom = `${text} ${attrs}`; break; }
+          if (!chosen && text.length && prices.length === 1) { chosen = text; dom = `${text} ${attrs}`; }
         }
-        if (!chosen) chosen = fallback;
-        if (!chosen) {
-          const prev = el.previousElementSibling;
-          const parent = el.parentElement;
-          chosen = [textOf(prev), textOf(parent), textOf(parent?.previousElementSibling)].filter(Boolean).join(' ');
-        }
-        return { anchor: textOf(el), container: chosen };
-      }).catch(() => ({ anchor: '', container: '' }));
+        if (!chosen) { const p = el.parentElement; chosen = textOf(p); dom = `${chosen} ${attrText(p)}`; }
+        return { anchor: textOf(el), container: chosen, dom };
+      }).catch(() => ({ anchor: '', container: '', dom: '' }));
 
-      let text = clean(info.container || info.anchor);
-      let price = parseDisplayedPrice(info.anchor) || parseDisplayedPrice(text);
+      const text = clean(info.container || info.anchor);
+      const price = parseDisplayedPrice(info.anchor) || parseDisplayedPrice(text);
       if (!price) continue;
-
       let room = parseRoom(text);
       let boardName = board(text);
-      let cancellation = cancel(text);
+      let cancellation = cancel(info.dom) || cancel(text);
 
       if (!room || !boardName) {
         const nearby = await link.evaluate((el) => {
           const txt = (n) => (n?.innerText || '').replace(/\s+/g, ' ').trim();
-          const nodes = [];
-          let n = el;
-          for (let d = 0; n && d < 6; d++, n = n.parentElement) {
-            if (n.previousElementSibling) nodes.push(txt(n.previousElementSibling));
-            if (n.nextElementSibling) nodes.push(txt(n.nextElementSibling));
-          }
+          const nodes = []; let n = el;
+          for (let d = 0; n && d < 5; d++, n = n.parentElement) { if (n.previousElementSibling) nodes.push(txt(n.previousElementSibling)); if (n.nextElementSibling) nodes.push(txt(n.nextElementSibling)); }
           return nodes.filter(Boolean).join(' ');
         }).catch(() => '');
-        if (nearby) {
-          if (!room) room = parseRoom(nearby);
-          if (!boardName) boardName = board(nearby);
-          if (!cancellation) cancellation = cancel(nearby);
-          text = clean(`${text} ${nearby}`);
-        }
+        if (nearby) { if (!room) room = parseRoom(nearby); if (!boardName) boardName = board(nearby); if (!cancellation) cancellation = cancel(nearby); }
       }
 
       const best = matchJson(state, room, boardName, search.hotel_name || '');
       if (!room && best) room = best.room;
       if (!boardName && best) boardName = best.board;
-      if (!cancellation && best) cancellation = best.cancellation || '';
-      if (room && boardName) out.push(makeRate(search, best, room, boardName, price, text, cancellation));
+      if (room && boardName) out.push(makeRate(search, best, room, boardName, price, cancellation));
     }
   }
   return dedupe(out).filter((item) => item.price > 0 && item.room && item.board).slice(0, Number(cfg.max_results) || 1000);
