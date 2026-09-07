@@ -38,36 +38,32 @@ async function extractRendered(context, cfg, search, state) {
         const priceRe = /(?:AED|SAR|USD|EUR|GBP|PKR|US\$|\$)\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?|\b[0-9]{2,6}\.[0-9]{2}\b/ig;
         const textOf = (n) => (n?.innerText || '').replace(/\s+/g, ' ').trim();
         const attrText = (n) => { if (!n || !n.getAttribute) return ''; return [n.getAttribute('alt'), n.getAttribute('title'), n.getAttribute('src'), n.getAttribute('href')].filter(Boolean).join(' '); };
+        const candidates = [];
         let node = el;
-        let chosen = '';
-        let dom = '';
-        for (let depth = 0; node && depth < 12; depth++, node = node.parentElement) {
+        for (let depth = 0; node && depth < 10; depth++, node = node.parentElement) {
           const text = textOf(node);
           const prices = text.match(priceRe) || [];
-          const popupLinks = node.querySelectorAll ? node.querySelectorAll('a[href*="RatePopup"]').length : 0;
+          if (text) candidates.push(text);
+          if (node.previousElementSibling) candidates.push(textOf(node.previousElementSibling));
+          if (node.previousElementSibling?.previousElementSibling) candidates.push(textOf(node.previousElementSibling.previousElementSibling));
+          if (node.parentElement?.previousElementSibling) candidates.push(textOf(node.parentElement.previousElementSibling));
+          if (node.parentElement?.previousElementSibling?.previousElementSibling) candidates.push(textOf(node.parentElement.previousElementSibling.previousElementSibling));
           const attrs = attrText(node) + ' ' + Array.from(node.querySelectorAll ? node.querySelectorAll('img,a,span') : []).map(attrText).join(' ');
-          if (text.length && prices.length === 1 && popupLinks === 1) { chosen = text; dom = `${text} ${attrs}`; break; }
-          if (!chosen && text.length && prices.length === 1) { chosen = text; dom = `${text} ${attrs}`; }
+          if (prices.length === 1) candidates.push(`${text} ${attrs}`.trim());
         }
-        if (!chosen) { const p = el.parentElement; chosen = textOf(p); dom = `${chosen} ${attrText(p)}`; }
-        return { anchor: textOf(el), container: chosen, dom };
-      }).catch(() => ({ anchor: '', container: '', dom: '' }));
+        return { anchor: textOf(el), candidates: candidates.filter(Boolean) };
+      }).catch(() => ({ anchor: '', candidates: [] }));
 
-      const text = clean(info.container || info.anchor);
-      const price = parseDisplayedPrice(info.anchor) || parseDisplayedPrice(text);
+      const price = parseDisplayedPrice(info.anchor);
       if (!price) continue;
-      let room = parseRoom(text);
-      let boardName = board(text);
-      let cancellation = cancel(info.dom) || cancel(text);
 
-      if (!room || !boardName) {
-        const nearby = await link.evaluate((el) => {
-          const txt = (n) => (n?.innerText || '').replace(/\s+/g, ' ').trim();
-          const nodes = []; let n = el;
-          for (let d = 0; n && d < 5; d++, n = n.parentElement) { if (n.previousElementSibling) nodes.push(txt(n.previousElementSibling)); if (n.nextElementSibling) nodes.push(txt(n.nextElementSibling)); }
-          return nodes.filter(Boolean).join(' ');
-        }).catch(() => '');
-        if (nearby) { if (!room) room = parseRoom(nearby); if (!boardName) boardName = board(nearby); if (!cancellation) cancellation = cancel(nearby); }
+      let room = '';
+      let boardName = '';
+      let cancellation = '';
+      for (const candidate of info.candidates || []) {
+        if (!boardName) boardName = board(candidate);
+        if (!cancellation) cancellation = cancel(candidate);
+        if (!room && /\s-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)\b/i.test(candidate)) room = parseRoom(candidate);
       }
 
       const best = matchJson(state, room, boardName, search.hotel_name || '');
