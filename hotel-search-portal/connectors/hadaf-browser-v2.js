@@ -2,12 +2,12 @@ const { chromium } = require('playwright');
 const { decrypt } = require('../crypto-util');
 const clean = v => String(v ?? '').replace(/\s+/g, ' ').trim();
 const LOGIN_FRAME = 'https://iolglobalb2bcloudssl.iolcloud.com/login.aspx?SourceXid=MTE3NTNTM=';
+const SEARCH_PAGE = 'https://iolglobalb2bcloudssl.iolcloud.com/HotelSearch.aspx?CallFrom=AWBE';
 
 function date(v) {
   const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
   return m ? `${m[3]}/${m[2]}/${m[1]}` : String(v || '');
 }
-
 async function bodyText(frame) { return clean(await frame.locator('body').innerText().catch(() => '')); }
 async function blocked(page) {
   for (const f of page.frames()) {
@@ -84,38 +84,44 @@ async function healthHadafSource(source) {
 }
 
 async function searchForm(page) {
-  const end = Date.now() + 45000;
+  const end = Date.now() + 20000;
   while (Date.now() < end) {
     for (const f of page.frames()) {
       const ok = await f.locator('#lpPannel_txtCity').count().catch(() => 0);
-      const form = await f.locator('input#lpPannel_txtFromDate').count().catch(() => 0);
+      const form = await f.locator('#lpPannel_txtFromDate').count().catch(() => 0);
       if (ok && form) return f;
     }
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(300);
   }
   return null;
+}
+
+async function openSearchPage(page, cfg) {
+  if (/HotelSearch\.aspx/i.test(page.url())) return;
+  const url = cfg.search_page_url || SEARCH_PAGE;
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: Number(cfg.search_page_timeout_ms) || 30000 });
+  await page.waitForTimeout(Number(cfg.search_page_wait_ms) || 2500);
+  await blocked(page);
 }
 
 async function chooseDestination(frame, value) {
   const input = frame.locator('#lpPannel_txtCity');
   await input.fill(String(value || ''));
   await frame.waitForTimeout(1200);
-  const wanted = clean(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const options = frame.locator('li:visible,[role="option"]:visible').filter({ hasText: new RegExp(wanted, 'i') });
+  const escaped = clean(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const options = frame.locator('li:visible,[role="option"]:visible').filter({ hasText: new RegExp(escaped, 'i') });
   if (await options.count().catch(() => 0)) {
     await options.first().click().catch(() => {});
   } else {
     await input.press('ArrowDown').catch(() => {});
     await input.press('Enter').catch(() => {});
   }
-  await frame.waitForTimeout(300);
+  await frame.waitForTimeout(500);
 }
 
 async function fillSearch(frame, search) {
   const country = frame.locator('#lpPannel_sel_nationality');
-  if (await country.count()) {
-    await country.selectOption({ label: String(search.country || 'United States of America') }).catch(() => {});
-  }
+  if (await country.count()) await country.selectOption({ label: String(search.country || 'United States of America') }).catch(() => {});
   await chooseDestination(frame, search.destination);
   await frame.locator('#lpPannel_txtFromDate').fill(date(search.checkin));
   await frame.locator('#lpPannel_txtToDate').fill(date(search.checkout));
@@ -128,27 +134,33 @@ async function fillSearch(frame, search) {
   await frame.locator('#lpPannel_txtToDate').press('Tab').catch(() => {});
 }
 
+async function controlSummary(frame) {
+  return frame.locator('input:visible,button:visible,a:visible').evaluateAll(els => els.slice(0,80).map(e => ({tag:e.tagName,type:e.type||'',id:e.id||'',name:e.name||'',value:e.value||'',text:(e.innerText||'').trim().slice(0,80),alt:e.alt||'',title:e.title||'',src:e.src||''}))).catch(() => []);
+}
+
 async function clickSearch(frame, cfg) {
   if (cfg.search_button_selector) {
     const x = frame.locator(cfg.search_button_selector).first();
-    if (await x.count().catch(() => 0) && await x.isVisible().catch(() => false)) { await x.click({ timeout: 10000 }); return; }
+    if (await x.count().catch(() => 0) && await x.isVisible().catch(() => false)) { await x.click({ timeout: 10000 }); return 'configured'; }
   }
   const inputs = frame.locator('input:visible');
   const n = await inputs.count().catch(() => 0);
   for (let i = 0; i < n; i++) {
     const x = inputs.nth(i);
-    const meta = await x.evaluate(e => ({ type:e.type || '', id:e.id || '', name:e.name || '', value:e.value || '', alt:e.alt || '', title:e.title || '', src:e.src || '' })).catch(() => null);
+    const meta = await x.evaluate(e => ({ type:e.type || '', id:e.id || '', name:e.name || '', value:e.value || '', alt:e.alt || '', title:e.title || '', src:e.src || })).catch(() => null);
     if (!meta) continue;
-    if (meta.type === 'image' && /search/i.test(Object.values(meta).join(' '))) { await x.click({ timeout: 10000 }); return; }
+    if ((meta.type === 'image' || meta.type === 'button' || meta.type === 'submit') && /search/i.test(Object.values(meta).join(' '))) { await x.click({ timeout: 10000 }); return meta.id || meta.name || meta.type; }
   }
   const buttons = frame.locator('button:visible,a:visible');
   const bn = await buttons.count().catch(() => 0);
   for (let i = 0; i < bn; i++) {
     const x = buttons.nth(i);
     const t = clean(await x.innerText().catch(() => ''));
-    if (/^search$/i.test(t) || /search/i.test(String(await x.getAttribute('title').catch(() => '')))) { await x.click({ timeout: 10000 }); return; }
+    const title = clean(await x.getAttribute('title').catch(() => ''));
+    const id = clean(await x.getAttribute('id').catch(() => ''));
+    if (/^search$/i.test(t) || /search/i.test(`${title} ${id}`)) { await x.click({ timeout: 10000 }); return id || t || 'button'; }
   }
-  throw new Error('Hadaf search button could not be detected');
+  throw new Error(`Hadaf search button could not be detected. Controls: ${JSON.stringify(await controlSummary(frame))}`);
 }
 
 function parseHadafRates(payload, cfg = {}) {
@@ -165,28 +177,12 @@ function parseHadafRates(payload, cfg = {}) {
         const price = Number(rate.br ?? rate.gr ?? rate.r);
         if (!Number.isFinite(price) || price <= 0) continue;
         const refundable = String(rate.p ?? '').toUpperCase() !== 'N' && String(rate.bo ?? '').toUpperCase() !== 'N';
-        out.push({
-          hotel: hotelName,
-          room: clean(rate.rt || ''),
-          view: clean(rate.view || rate.roomView || ''),
-          board: clean(rate.mp || ''),
-          cancellation: refundable ? clean(rate.hTCanx || '') : 'Non-refundable',
-          price,
-          currency: clean(rate.cc || rate.scc || cfg.default_currency || 'AED'),
-          availability: String(rate.sts || '').toUpperCase() === 'A' ? 'Available' : clean(rate.sts || ''),
-          supplier: 'Hadaf Holidays',
-          supplierRoomCode: clean(rate.ThirdPartyRoomCode || ''),
-          rateFrom: clean(rate.fd || ''),
-          rateTo: clean(rate.td || '')
-        });
+        out.push({ hotel:hotelName, room:clean(rate.rt||''), view:clean(rate.view||rate.roomView||''), board:clean(rate.mp||''), cancellation:refundable?clean(rate.hTCanx||''):'Non-refundable', price, currency:clean(rate.cc||rate.scc||cfg.default_currency||'AED'), availability:String(rate.sts||'').toUpperCase()==='A'?'Available':clean(rate.sts||''), supplier:'Hadaf Holidays', supplierRoomCode:clean(rate.ThirdPartyRoomCode||''), rateFrom:clean(rate.fd||''), rateTo:clean(rate.td||'') });
       }
     }
   }
   const seen = new Set();
-  return out.filter(r => {
-    const k = [r.hotel,r.room,r.view,r.board,r.cancellation,r.price,r.currency,r.availability,r.supplierRoomCode,r.rateFrom,r.rateTo].join('|');
-    if (seen.has(k)) return false; seen.add(k); return true;
-  });
+  return out.filter(r => { const k=[r.hotel,r.room,r.view,r.board,r.cancellation,r.price,r.currency,r.availability,r.supplierRoomCode,r.rateFrom,r.rateTo].join('|'); if(seen.has(k)) return false; seen.add(k); return true; });
 }
 
 async function searchHadafSource(source, search) {
@@ -201,31 +197,27 @@ async function searchHadafSource(source, search) {
     const page = await context.newPage();
     page.setDefaultTimeout(Number(cfg.timeout_ms)||15000);
     const apiBodies = [];
-    page.on('response', async response => {
-      if (!/GetHotelsJson\.aspx/i.test(response.url())) return;
-      if (response.status() !== 200) return;
-      try { const body = await response.text(); if (body && body.length > 20) apiBodies.push(body); } catch {}
-    });
+    const apiRequests = [];
+    page.on('request', request => { if (/GetHotelsJson\.aspx/i.test(request.url())) apiRequests.push({url:request.url(),method:request.method()}); });
+    page.on('response', async response => { if(!/GetHotelsJson\.aspx/i.test(response.url())||response.status()!==200)return; try{const body=await response.text();if(body&&body.length>20)apiBodies.push(body);}catch{} });
     await page.goto(source.login_url, { waitUntil:'commit', timeout:60000 });
     await page.waitForTimeout(Number(cfg.initial_wait_ms)||3000);
     await blocked(page);
     await login(page, source, password, cfg);
+    await openSearchPage(page, cfg);
     const frame = await searchForm(page);
-    if (!frame) throw new Error('Hadaf hotel search form could not be detected');
+    if (!frame) throw new Error(`Hadaf hotel search form could not be detected. URL: ${page.url()}`);
     await fillSearch(frame, search);
     const before = apiBodies.length;
-    await clickSearch(frame, cfg);
+    const clicked = await clickSearch(frame, cfg);
     const end = Date.now() + (Number(cfg.search_wait_ms)||45000);
     while (Date.now() < end && apiBodies.length === before) await page.waitForTimeout(500);
-    const results = apiBodies.flatMap(b => { try { return parseHadafRates(JSON.parse(b), cfg); } catch { return []; } });
-    if (!results.length) throw new Error(`Hadaf search completed but no priced rates were extracted. GetHotelsJson responses: ${apiBodies.length}. Browser pages: ${context.pages().length}.`);
-    return { configured:true, results:results.slice(0,Number(cfg.max_results)||500), error:null };
+    const results = apiBodies.flatMap(b => { try{return parseHadafRates(JSON.parse(b),cfg);}catch{return [];} });
+    if (!results.length) throw new Error(`Hadaf search completed but no priced rates were extracted. GetHotelsJson responses: ${apiBodies.length}. Requests: ${JSON.stringify(apiRequests)}. Search control: ${clicked}. URL: ${page.url()}`);
+    return {configured:true,results:results.slice(0,Number(cfg.max_results)||500),error:null};
   } catch (e) {
-    return { configured:true, results:[], error:e.name === 'TimeoutError' ? 'Hadaf browser timed out' : e.message };
-  } finally {
-    if (context) await context.close().catch(() => {});
-    if (browser) await browser.close().catch(() => {});
-  }
+    return {configured:true,results:[],error:e.name==='TimeoutError'?'Hadaf browser timed out':e.message};
+  } finally { if(context) await context.close().catch(()=>{}); if(browser) await browser.close().catch(()=>{}); }
 }
 
-module.exports = { searchHadafSource, healthHadafSource };
+module.exports={searchHadafSource,healthHadafSource};
