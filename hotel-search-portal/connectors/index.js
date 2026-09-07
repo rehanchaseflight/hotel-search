@@ -1,4 +1,4 @@
-const { searchHadafSource, healthHadafSource } = require('./hadaf-browser-v3');
+const { searchHadafSource, healthHadafSource } = require('./hadaf-browser-v4');
 const CONNECTORS=[{id:'hadaf',name:'Hadaf Holidays',type:'browser'}];
 function configuredConnectors(){return CONNECTORS.map(c=>({id:c.id,name:c.name,type:c.type,configured:true,status:'database'}))}
 async function searchAll(search,sources=[]){const s=sources.find(x=>x.enabled!==false&&/hadaf/i.test(String(x.name||''))&&(x.connector_type==='browser'||x.connector_type==='playwright'));if(!s)return{results:[],statuses:[{id:'hadaf',name:'Hadaf Holidays',configured:false,ok:false,status:'offline',error:'Hadaf supplier is not configured'}]};const r=await searchHadafSource(s,search);return{results:r.results||[],statuses:[{id:String(s.id),name:s.name,configured:r.configured,ok:!r.error,error:r.error||null,status:r.configured?(r.error?'offline':'live'):'offline'}]}}
