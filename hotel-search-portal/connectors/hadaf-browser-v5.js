@@ -11,7 +11,16 @@ const escapeRegex = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function parseDisplayedPrice(text, def = 'AED') { const m = clean(text).match(PRICE_RE); if (!m) return null; const q = m[0].replace(/,/g, '').match(/[0-9]+(?:\.[0-9]{1,2})?/); if (!q) return null; const n = Number(q[0]); if (!(n > 0)) return null; const cm = m[0].match(/AED|SAR|USD|EUR|GBP|PKR|US\$|\$/i); return { price: n, currency: cm ? cm[0].toUpperCase() : def }; }
 function board(text) { const m = clean(text).match(BOARDS); return m ? clean(m[0]) : ''; }
 function cancel(text) { const m = clean(text).match(/Non[- ]?refundable|Free Cancellation|Refundable/i); return m ? clean(m[0]) : ''; }
-function parseRoom(text) { let x = clean(text).replace(/^.*?Pax:\s*\d+A\d+C\s*/i, '').replace(/\s+(?:Non[- ]?refundable|Free Cancellation|Refundable|Package Rate|Show All Room Types|Live Search Results)\b.*$/i, ''); const m = x.match(/^(.+?)\s*-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)\b/i); return clean(m ? m[1] : x); }
+function parseRoom(text) {
+  let x = clean(text).replace(/^.*?Pax:\s*\d+A\d+C\s*/i, '');
+  const byBoard = x.match(/^(.+?)\s*-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)\b/i);
+  if (byBoard) return clean(byBoard[1]);
+  const paxRoom = clean(text).match(/Pax:\s*\d+A\d+C\s+(.+?)\s*-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)\b/i);
+  if (paxRoom) return clean(paxRoom[1]);
+  const roomWords = clean(text).match(/\b((?:Double|Twin|Triple|Quadruple|Quintuple|Family|Standard|Deluxe|Superior|King|Queen|Single)[A-Za-z0-9 /-]{2,80}?)\s*-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)\b/i);
+  if (roomWords) return clean(roomWords[1]);
+  return clean(x.replace(/\s+(?:Non[- ]?refundable|Free Cancellation|Refundable|Package Rate|Show All Room Types|Live Search Results)\b.*$/i, ''));
+}
 function dedupe(rows) { const seen = new Set(); return rows.filter((r) => { const key = [norm(r.hotel), norm(r.room), norm(r.board), norm(r.cancellation), Number(r.price).toFixed(2), norm(r.currency)].join('|'); if (seen.has(key)) return false; seen.add(key); return true; }); }
 async function bodyText(frame) { return clean(await frame.locator('body').innerText().catch(() => '')); }
 async function blocked(page) { for (const frame of page.frames()) { const text = await bodyText(frame); if (/captcha|verify you are human|access denied|unusual traffic|security check/i.test(text)) throw new Error('Supplier presented a security verification step; automated bypass is not supported'); } }
@@ -48,9 +57,10 @@ async function extractRendered(context, cfg, search, state) {
             const cells = Array.from(row.querySelectorAll('td,th')).map(textOf).filter(Boolean);
             let room = '';
             for (const cell of cells) {
-              if (/\s-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)\b/i.test(cell)) { room = cell.replace(/^.*?Pax:\s*\d+A\d+C\s*/i, '').match(/^(.+?)\s*-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)\b/i)?.[1] || ''; break; }
+              const m = cell.match(/^(.+?)\s*-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)\b/i);
+              if (m && !/(?:AED|SAR|USD|EUR|GBP|PKR|\$)\s*[0-9]/i.test(m[1])) { room = m[1].trim(); break; }
             }
-            return { text: rowText, room: room.trim(), board: rowText.match(boardRe)?.[0] || '', cancellation: rowText.match(cancelRe)?.[0] || '' };
+            return { text: rowText, room, board: rowText.match(boardRe)?.[0] || '', cancellation: rowText.match(cancelRe)?.[0] || '' };
           }
         }
         let node = el;
