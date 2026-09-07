@@ -18,6 +18,23 @@ async function controlNearLabel(f,label,tag){const controls=f.locator(`${tag}:vi
 async function firstVisible(f,selectors){for(const s of selectors.filter(Boolean)){try{const x=f.locator(s).first();if(await x.count()&&await x.isVisible())return x}catch{}}return null;}
 async function findLabeled(f,label,tag,selectors){return await controlNearLabel(f,label,tag)||await firstVisible(f,selectors)}
 async function chooseDestination(f,value){const wanted=clean(value).toLowerCase();if(!wanted)return;await new Promise(r=>setTimeout(r,1000));const exact=f.locator('li:visible,[role="option"]:visible').filter({hasText:new RegExp(wanted.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i')}).first();if(await exact.count().catch(()=>0))await exact.click().catch(()=>{});}
+async function clickHadafSearch(f,cfg){
+  if(cfg.search_button_selector){const direct=await firstVisible(f,[cfg.search_button_selector]);if(direct){await direct.click({timeout:10000});return;}}
+  const labeled=f.locator('text=Search').filter({visible:true});
+  const count=await labeled.count().catch(()=>0);
+  for(let i=0;i<count;i++){
+    const label=labeled.nth(i);
+    const clickable=label.locator('xpath=ancestor::*[self::td or self::div or self::span or self::label][1]//input[not(@disabled)] | ancestor::*[self::td or self::div or self::span or self::label][1]//button[not(@disabled)] | ancestor::*[self::td or self::div or self::span or self::label][1]//a[not(@disabled)]').first();
+    if(await clickable.count().catch(()=>0)&&await clickable.isVisible().catch(()=>false)){await clickable.click({timeout:10000});return;}
+  }
+  const candidates=f.locator('input:visible,button:visible,a:visible');
+  const n=await candidates.count().catch(()=>0);
+  for(let i=0;i<n;i++){
+    const x=candidates.nth(i);const meta=await x.evaluate(e=>({type:e.type||'',value:e.value||'',alt:e.alt||'',title:e.title||'',id:e.id||'',name:e.name||'',src:e.src||''})).catch(()=>null);if(!meta)continue;
+    if(/search/i.test(Object.values(meta).join(' '))){await x.click({timeout:10000});return;}
+  }
+  throw new Error('Hadaf search button could not be detected');
+}
 async function searchPortal(context,s,cfg){const target=await findSearchTarget(context,cfg);if(!target)throw new Error('Hadaf hotel search form could not be detected');const f=target.frame;
 const country=await findLabeled(f,'Country of Residence','select',[cfg.country_selector,'select[name*="country" i]','select[id*="country" i]']);if(country){const wanted=String(s.country||cfg.default_country||'United States of America');await country.selectOption({label:wanted}).catch(async()=>{await country.selectOption({label:/United States/i.test(wanted)?'United States of America':wanted}).catch(()=>{})});}
 const d=await findLabeled(f,'Destination City / Zone','input',[cfg.destination_selector,'input[name*="destination" i]','input[id*="destination" i]','input[name*="city" i]','input[id*="city" i]']);if(!d)throw new Error('Hadaf destination field could not be detected');await d.fill(String(s.destination));await d.press('ArrowDown').catch(()=>{});await chooseDestination(f,s.destination);await d.press('Tab').catch(()=>{});await target.page.waitForTimeout(500);
@@ -27,8 +44,7 @@ const rooms=await findLabeled(f,'Room/s','select',[cfg.rooms_selector,'select[na
 const adults=await findLabeled(f,'Room 1 Adults','select',[cfg.guests_selector,'select[name*="adult" i]','select[id*="adult" i]']);if(adults)await adults.selectOption({label:String(s.guests||2)}).catch(()=>{});
 const children=await findLabeled(f,'Children','select',[cfg.children_selector,'select[name*="child" i]']);if(children)await children.selectOption({label:String(s.children??0)}).catch(()=>{});
 const hotel=await findLabeled(f,'Hotel Name contains','input',[cfg.hotel_name_selector,'input[name*="hotel" i]','input[id*="hotel" i]']);if(hotel&&s.hotel_name)await hotel.fill(String(s.hotel_name));
-const direct=cfg.search_button_selector?await firstVisible(f,[cfg.search_button_selector]):null;if(direct){await direct.click({timeout:10000});return}
-const inputs=f.locator('input:visible');const n=await inputs.count().catch(()=>0);let fallback=null;for(let i=0;i<n;i++){const x=inputs.nth(i);const meta=await x.evaluate(e=>({type:e.type||'',value:e.value||'',alt:e.alt||'',title:e.title||'',id:e.id||'',name:e.name||'',src:e.src||''})).catch(()=>null);if(!meta)continue;const attrs=Object.values(meta).join(' ');if(/search/i.test(attrs)){fallback=x;break}if(!fallback&&/^(image|submit|button)$/i.test(meta.type))fallback=x}if(fallback){await fallback.click({timeout:10000});return}const b=await firstVisible(f,['button:has-text("Search")','a:has-text("Search")']);if(!b)throw new Error('Hadaf search button could not be detected');await b.click({timeout:10000});}
+await clickHadafSearch(f,cfg);}
 function parseRate(t,def='AED'){const m=clean(t).match(PRICE_RE);if(!m)return null;const n=m[0].match(/[0-9][0-9,]*(?:\.[0-9]{1,2})?/);const price=Number(n?.[0]?.replace(/,/g,''));if(!Number.isFinite(price)||price<=0)return null;const c=(m[0].match(/AED|SAR|USD|EUR|GBP|PKR|US\$|\$/i)||[def])[0];return{price,currency:clean(c),room:clean((t.match(/(?:Triple|Twin|Double|Single|Quadruple|Family|Deluxe|Standard|Superior|King|Queen|Suite|Apartment|Villa)[^|]*?(?:Room|Suite|Bed|Only|Included)?/i)||[''])[0]),board:clean((t.match(/Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive/i)||[''])[0]),cancellation:clean((t.match(/Non[- ]?refundable|Free Cancellation|Refundable/i)||[''])[0]),availability:clean((t.match(/Available|On Request|Sold Out|Not Available/i)||['Available'])[0]),raw:clean(t)}}
 function parseApiObject(obj,def='AED'){const found=[];const walk=(v,path=[])=>{if(v==null)return;if(typeof v==='string'){if(PRICE_RE.test(v))found.push({text:v,path});return}if(Array.isArray(v)){for(let i=0;i<v.length;i++)walk(v[i],path.concat(i));return}if(typeof v==='object'){for(const [k,x] of Object.entries(v))walk(x,path.concat(k))}};walk(obj);return found}
 async function extractApiResponse(body,cfg){let obj;try{obj=JSON.parse(body)}catch{return[]}const hits=parseApiObject(obj,cfg.default_currency||'AED');return hits.map((h,i)=>{const r=parseRate(h.text,cfg.default_currency||'AED');return r?{hotel:'',...r,raw:h.text,apiPath:h.path.join('.'),api:true,index:i}:null}).filter(Boolean)}
