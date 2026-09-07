@@ -1,0 +1,231 @@
+const { chromium } = require('playwright');
+const { decrypt } = require('../crypto-util');
+const clean = v => String(v ?? '').replace(/\s+/g, ' ').trim();
+const LOGIN_FRAME = 'https://iolglobalb2bcloudssl.iolcloud.com/login.aspx?SourceXid=MTE3NTNTM=';
+
+function date(v) {
+  const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(v || '');
+}
+
+async function bodyText(frame) { return clean(await frame.locator('body').innerText().catch(() => '')); }
+async function blocked(page) {
+  for (const f of page.frames()) {
+    if (/captcha|verify you are human|access denied|unusual traffic|security check/i.test(await bodyText(f))) {
+      throw new Error('Supplier presented a security verification step; automated bypass is not supported');
+    }
+  }
+}
+async function loggedIn(page) {
+  let t = '';
+  for (const f of page.frames()) t += ' ' + await bodyText(f);
+  return /welcome\b|\blogout\b/i.test(t);
+}
+async function findLoginFrame(page) {
+  for (const f of page.frames()) {
+    if (await f.locator('#tbUserName').count().catch(() => 0)) return f;
+  }
+  return page.frames().find(f => /login\.aspx/i.test(f.url())) || null;
+}
+
+async function login(page, source, password, cfg) {
+  let frame = null;
+  const end = Date.now() + (Number(cfg.login_frame_timeout_ms) || 45000);
+  while (!frame && Date.now() < end) {
+    frame = await findLoginFrame(page);
+    if (!frame) await page.waitForTimeout(500);
+  }
+  if (!frame) {
+    try { await page.goto(cfg.login_frame_url || LOGIN_FRAME, { waitUntil: 'commit', timeout: 20000 }); await page.waitForTimeout(1500); } catch {}
+    frame = await findLoginFrame(page);
+  }
+  if (!frame) {
+    if (await loggedIn(page)) return;
+    throw new Error('Hadaf login iframe could not be detected');
+  }
+  await frame.locator('#tbUserName').fill(String(source.site_username || ''));
+  await frame.locator('#tbPassword').fill(String(password || ''));
+  const terms = frame.locator('#chkTermCondn').first();
+  if (await terms.count().catch(() => 0) && !(await terms.isChecked().catch(() => false))) await terms.check().catch(() => {});
+  await frame.locator('#btnLogin1').click({ timeout: 10000 });
+  await page.waitForTimeout(Number(cfg.post_login_wait_ms) || 7000);
+  await blocked(page);
+  if (!await loggedIn(page)) throw new Error('Hadaf login was submitted but the portal did not show a logged-in state');
+}
+
+async function openHadaf(source) {
+  const cfg = source.browser_config || {};
+  if (!source.login_url || !source.site_username || !source.site_password_enc) return { configured: false, live: false, error: 'Hadaf credentials are not configured' };
+  let password;
+  try { password = decrypt(source.site_password_enc); } catch (e) { return { configured: true, live: false, error: `Credential decryption failed: ${e.message}` }; }
+  let browser, context;
+  try {
+    browser = await chromium.launch({ headless: true });
+    context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const page = await context.newPage();
+    page.setDefaultTimeout(Number(cfg.timeout_ms) || 15000);
+    await page.goto(source.login_url, { waitUntil: 'commit', timeout: 60000 });
+    await page.waitForTimeout(Number(cfg.initial_wait_ms) || 3000);
+    await blocked(page);
+    await login(page, source, password, cfg);
+    return { configured: true, live: true, browser, context, page };
+  } catch (e) {
+    if (context) await context.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
+    return { configured: true, live: false, error: e.name === 'TimeoutError' ? 'Hadaf browser timed out' : e.message };
+  }
+}
+
+async function healthHadafSource(source) {
+  const r = await openHadaf(source);
+  if (r.context) await r.context.close().catch(() => {});
+  if (r.browser) await r.browser.close().catch(() => {});
+  return { configured: r.configured, live: r.live, error: r.error || null };
+}
+
+async function searchForm(page) {
+  const end = Date.now() + 45000;
+  while (Date.now() < end) {
+    for (const f of page.frames()) {
+      const ok = await f.locator('#lpPannel_txtCity').count().catch(() => 0);
+      const form = await f.locator('input#lpPannel_txtFromDate').count().catch(() => 0);
+      if (ok && form) return f;
+    }
+    await page.waitForTimeout(400);
+  }
+  return null;
+}
+
+async function chooseDestination(frame, value) {
+  const input = frame.locator('#lpPannel_txtCity');
+  await input.fill(String(value || ''));
+  await frame.waitForTimeout(1200);
+  const wanted = clean(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const options = frame.locator('li:visible,[role="option"]:visible').filter({ hasText: new RegExp(wanted, 'i') });
+  if (await options.count().catch(() => 0)) {
+    await options.first().click().catch(() => {});
+  } else {
+    await input.press('ArrowDown').catch(() => {});
+    await input.press('Enter').catch(() => {});
+  }
+  await frame.waitForTimeout(300);
+}
+
+async function fillSearch(frame, search) {
+  const country = frame.locator('#lpPannel_sel_nationality');
+  if (await country.count()) {
+    await country.selectOption({ label: String(search.country || 'United States of America') }).catch(() => {});
+  }
+  await chooseDestination(frame, search.destination);
+  await frame.locator('#lpPannel_txtFromDate').fill(date(search.checkin));
+  await frame.locator('#lpPannel_txtToDate').fill(date(search.checkout));
+  await frame.locator('#lpPannel_txtNights').fill(String(Math.max(1, Number(search.nights || 1))));
+  await frame.locator('#sel_NoOfRooms').selectOption(String(search.rooms || 1)).catch(() => {});
+  await frame.locator('#sel_NoOfAdult_1').selectOption(String(search.guests || 2)).catch(() => {});
+  await frame.locator('#sel_NoOfChild_1').selectOption(String(search.children ?? 0)).catch(() => {});
+  if (search.hotel_name) await frame.locator('#lpPannel_txtHotel').fill(String(search.hotel_name));
+  await frame.locator('#lpPannel_txtFromDate').press('Tab').catch(() => {});
+  await frame.locator('#lpPannel_txtToDate').press('Tab').catch(() => {});
+}
+
+async function clickSearch(frame, cfg) {
+  if (cfg.search_button_selector) {
+    const x = frame.locator(cfg.search_button_selector).first();
+    if (await x.count().catch(() => 0) && await x.isVisible().catch(() => false)) { await x.click({ timeout: 10000 }); return; }
+  }
+  const inputs = frame.locator('input:visible');
+  const n = await inputs.count().catch(() => 0);
+  for (let i = 0; i < n; i++) {
+    const x = inputs.nth(i);
+    const meta = await x.evaluate(e => ({ type:e.type || '', id:e.id || '', name:e.name || '', value:e.value || '', alt:e.alt || '', title:e.title || '', src:e.src || '' })).catch(() => null);
+    if (!meta) continue;
+    if (meta.type === 'image' && /search/i.test(Object.values(meta).join(' '))) { await x.click({ timeout: 10000 }); return; }
+  }
+  const buttons = frame.locator('button:visible,a:visible');
+  const bn = await buttons.count().catch(() => 0);
+  for (let i = 0; i < bn; i++) {
+    const x = buttons.nth(i);
+    const t = clean(await x.innerText().catch(() => ''));
+    if (/^search$/i.test(t) || /search/i.test(String(await x.getAttribute('title').catch(() => '')))) { await x.click({ timeout: 10000 }); return; }
+  }
+  throw new Error('Hadaf search button could not be detected');
+}
+
+function parseHadafRates(payload, cfg = {}) {
+  const out = [];
+  const hotels = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.d) ? payload.d : [payload]);
+  for (const hotel of hotels) {
+    if (!hotel || typeof hotel !== 'object') continue;
+    const hotelName = clean(hotel.n || hotel.hotelName || hotel.HotelName || '');
+    const groups = Array.isArray(hotel.rlst) ? hotel.rlst : [];
+    for (const group of groups) {
+      const rates = Array.isArray(group && group.rdlst) ? group.rdlst : [];
+      for (const rate of rates) {
+        if (!rate || typeof rate !== 'object') continue;
+        const price = Number(rate.br ?? rate.gr ?? rate.r);
+        if (!Number.isFinite(price) || price <= 0) continue;
+        const refundable = String(rate.p ?? '').toUpperCase() !== 'N' && String(rate.bo ?? '').toUpperCase() !== 'N';
+        out.push({
+          hotel: hotelName,
+          room: clean(rate.rt || ''),
+          view: clean(rate.view || rate.roomView || ''),
+          board: clean(rate.mp || ''),
+          cancellation: refundable ? clean(rate.hTCanx || '') : 'Non-refundable',
+          price,
+          currency: clean(rate.cc || rate.scc || cfg.default_currency || 'AED'),
+          availability: String(rate.sts || '').toUpperCase() === 'A' ? 'Available' : clean(rate.sts || ''),
+          supplier: 'Hadaf Holidays',
+          supplierRoomCode: clean(rate.ThirdPartyRoomCode || ''),
+          rateFrom: clean(rate.fd || ''),
+          rateTo: clean(rate.td || '')
+        });
+      }
+    }
+  }
+  const seen = new Set();
+  return out.filter(r => {
+    const k = [r.hotel,r.room,r.view,r.board,r.cancellation,r.price,r.currency,r.availability,r.supplierRoomCode,r.rateFrom,r.rateTo].join('|');
+    if (seen.has(k)) return false; seen.add(k); return true;
+  });
+}
+
+async function searchHadafSource(source, search) {
+  const cfg = source.browser_config || {};
+  if (!source.login_url || !source.site_username || !source.site_password_enc) return { configured:false, results:[], error:null };
+  let password;
+  try { password = decrypt(source.site_password_enc); } catch (e) { return { configured:true, results:[], error:`Credential decryption failed: ${e.message}` }; }
+  let browser, context;
+  try {
+    browser = await chromium.launch({ headless:true });
+    context = await browser.newContext({ viewport:{width:1440,height:1000} });
+    const page = await context.newPage();
+    page.setDefaultTimeout(Number(cfg.timeout_ms)||15000);
+    const apiBodies = [];
+    page.on('response', async response => {
+      if (!/GetHotelsJson\.aspx/i.test(response.url())) return;
+      if (response.status() !== 200) return;
+      try { const body = await response.text(); if (body && body.length > 20) apiBodies.push(body); } catch {}
+    });
+    await page.goto(source.login_url, { waitUntil:'commit', timeout:60000 });
+    await page.waitForTimeout(Number(cfg.initial_wait_ms)||3000);
+    await blocked(page);
+    await login(page, source, password, cfg);
+    const frame = await searchForm(page);
+    if (!frame) throw new Error('Hadaf hotel search form could not be detected');
+    await fillSearch(frame, search);
+    const before = apiBodies.length;
+    await clickSearch(frame, cfg);
+    const end = Date.now() + (Number(cfg.search_wait_ms)||45000);
+    while (Date.now() < end && apiBodies.length === before) await page.waitForTimeout(500);
+    const results = apiBodies.flatMap(b => { try { return parseHadafRates(JSON.parse(b), cfg); } catch { return []; } });
+    if (!results.length) throw new Error(`Hadaf search completed but no priced rates were extracted. GetHotelsJson responses: ${apiBodies.length}. Browser pages: ${context.pages().length}.`);
+    return { configured:true, results:results.slice(0,Number(cfg.max_results)||500), error:null };
+  } catch (e) {
+    return { configured:true, results:[], error:e.name === 'TimeoutError' ? 'Hadaf browser timed out' : e.message };
+  } finally {
+    if (context) await context.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
+module.exports = { searchHadafSource, healthHadafSource };
