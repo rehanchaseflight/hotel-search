@@ -24,7 +24,7 @@ function cancelFrom(text) { const m = clean(text).match(CANCEL_RE); return m ? c
 function isPriceOnly(text) { const x = clean(text); return !!x && !roomFrom(x) && !boardFrom(x) && /^\s*(?:AED|SAR|USD|EUR|GBP|PKR|US\$|\$)?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*$/i.test(x); }
 function dedupe(rows) {
   const seen = new Set();
-  return rows.filter((r) => { const k = [norm(r.hotel), norm(r.room), norm(r.board), norm(r.cancellation), Number(r.price).toFixed(2), norm(r.currency)].join('|'); if (seen.has(k)) return false; seen.add(k); return true; });
+  return rows.filter((r) => { const k = [norm(r.hotel), norm(r.room), norm(r.board), norm(r.cancellation), r.price == null ? 'NO_PRICE' : Number(r.price).toFixed(2), norm(r.currency)].join('|'); if (seen.has(k)) return false; seen.add(k); return true; });
 }
 
 async function bodyText(frame) { return clean(await frame.locator('body').innerText().catch(() => '')); }
@@ -72,7 +72,7 @@ async function clickSearch(frame) { const link = frame.locator('a#lpPannel_btnMo
 function flattenJson(value, out = []) {
   if (Array.isArray(value)) { value.forEach((x) => flattenJson(x, out)); return out; }
   if (!value || typeof value !== 'object') return out;
-  if (value.n && value.rlst) for (const group of value.rlst || []) for (const rate of group.rdlst || []) out.push({ hotel: clean(value.n), room: clean(rate.rt), board: clean(rate.mp), supplierRoomCode: clean(rate.ThirdPartyRoomCode), rateFrom: clean(rate.fd), rateTo: clean(rate.td) });
+  if (value.n && value.rlst) for (const group of value.rlst || []) for (const rate of group.rdlst || []) out.push({ hotel: clean(value.n), room: clean(rate.rt), board: clean(rate.mp), supplierRoomCode: clean(rate.ThirdPartyRoomCode), rateFrom: clean(rate.fd), rateTo: clean(rate.td), available: clean(rate.sts).toUpperCase() === 'A', currency: clean(rate.cc) });
   for (const key of Object.keys(value)) if (key !== 'rlst') flattenJson(value[key], out);
   return out;
 }
@@ -81,9 +81,9 @@ function captureJson(context, state) {
     try { if (/GetHotelsJson\.aspx/i.test(response.url()) && response.status() === 200) { state.json = flattenJson(JSON.parse(await response.text()), []); state.jsonResponse = true; } } catch (_) {}
   });
 }
-function hotelCandidates(state, hotel) { const h = norm(hotel); return (state.json || []).filter((x) => !h || norm(x.hotel) === h); }
+function hotelCandidates(state, hotel) { const h = norm(hotel); return (state.json || []).filter((x) => (!h || norm(x.hotel) === h) && x.available !== false); }
 function makeRate(search, meta, room, boardName, price, cancellation) {
-  return { hotel: search.hotel_name || meta?.hotel || '', room, view: '', board: boardName, cancellation, price: price.price, currency: price.currency, availability: 'Available', supplier: 'Hadaf Holidays', supplierRoomCode: meta?.supplierRoomCode || '', rateFrom: meta?.rateFrom || '', rateTo: meta?.rateTo || '' };
+  return { hotel: search.hotel_name || meta?.hotel || '', room, view: '', board: boardName, cancellation, price: price?.price ?? null, currency: price?.currency || meta?.currency || 'AED', availability: 'Available', supplier: 'Hadaf Holidays', supplierRoomCode: meta?.supplierRoomCode || '', rateFrom: meta?.rateFrom || '', rateTo: meta?.rateTo || '' };
 }
 
 async function extractRendered(context, cfg, search, state) {
@@ -101,40 +101,29 @@ async function extractRendered(context, cfg, search, state) {
         const cancelRe = /Non[- ]?refundable|Free Cancellation|Refundable/i;
         const roomRe = /((?:Double|Twin|Triple|Quadruple|Quintuple|Family|Standard|Deluxe|Superior|King|Queen|Single)[A-Za-z0-9 /-]{1,100}?)\s*-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)\b/i;
         const parse = (n) => { const t = textOf(n); return { t, p: t.match(priceRe) || [], room: (t.match(roomRe)?.[1] || '').trim(), board: t.match(boardRe)?.[0] || '', cancel: t.match(cancelRe)?.[0] || '' }; };
-        const cell = el.closest?.('td,th');
-        const row = el.closest?.('tr');
-        const parts = [];
-        let n = cell?.previousElementSibling;
+        const cell = el.closest?.('td,th'); const row = el.closest?.('tr'); const parts = []; let n = cell?.previousElementSibling;
         for (let j = 0; n && j < 8; j++, n = n.previousElementSibling) parts.push(parse(n));
         if (cell) parts.unshift(parse(cell));
         const rowInfo = row ? parse(row) : null;
-        let room = parts.find((x) => x.room)?.room || rowInfo?.room || '';
-        let board = parts.find((x) => x.board)?.board || rowInfo?.board || '';
-        let cancel = parts.find((x) => x.cancel)?.cancel || '';
+        let room = parts.find((x) => x.room)?.room || rowInfo?.room || ''; let board = parts.find((x) => x.board)?.board || rowInfo?.board || ''; let cancel = parts.find((x) => x.cancel)?.cancel || '';
         let text = parts.find((x) => x.p.length === 1)?.t || textOf(el.parentElement || el);
-        if (!room) {
-          let node = el.parentElement;
-          for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
-            const t = textOf(node); const m = t.match(roomRe); const ps = t.match(priceRe) || []; const rs = node.querySelectorAll?.('a[href*="RatePopup"]').length || 0;
-            if (m && ps.length === 1 && rs === 1) { room = m[1].trim(); text = t; board = board || t.match(boardRe)?.[0] || ''; cancel = cancel || t.match(cancelRe)?.[0] || ''; break; }
-          }
-        }
+        if (!room) { let node = el.parentElement; for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) { const t = textOf(node); const m = t.match(roomRe); const ps = t.match(priceRe) || []; const rs = node.querySelectorAll?.('a[href*="RatePopup"]').length || 0; if (m && ps.length === 1 && rs === 1) { room = m[1].trim(); text = t; board = board || t.match(boardRe)?.[0] || ''; cancel = cancel || t.match(cancelRe)?.[0] || ''; break; } } }
         return { text, room, board, cancel };
       }).catch(() => ({ text: '', room: '', board: '', cancel: '' }));
-
-      const price = parsePrice(info.text); if (!price) continue;
-      let room = clean(info.room); if (isPriceOnly(room)) room = '';
-      let boardName = clean(info.board); let cancellation = clean(info.cancel);
-      let meta = null;
+      const p = parsePrice(info.text); let room = clean(info.room); if (isPriceOnly(room)) room = ''; let boardName = clean(info.board); let cancellation = clean(info.cancel); let meta = null;
       if (room) meta = candidates.find((x) => norm(x.room) === norm(room)) || candidates.find((x) => norm(x.room).includes(norm(room)) || norm(room).includes(norm(x.room)));
       if (!room && candidates[i]) meta = candidates[i];
-      if (!room && meta) room = meta.room;
-      if (!boardName && meta) boardName = meta.board;
+      if (!room && meta) room = meta.room; if (!boardName && meta) boardName = meta.board;
       if (!room || !boardName) continue;
-      out.push(makeRate(search, meta, room, boardName, price, cancellation));
+      out.push(makeRate(search, meta, room, boardName, p, cancellation));
     }
   }
-  return dedupe(out).filter((r) => r.price > 0 && r.room && r.board).slice(0, Number(cfg.max_results) || 1000);
+  const pricedKeys = new Set(out.filter(r => r.price != null).map(r => `${norm(r.hotel)}|${norm(r.room)}|${norm(r.board)}`));
+  for (const meta of hotelCandidates(state, search.hotel_name || '')) {
+    const key = `${norm(meta.hotel)}|${norm(meta.room)}|${norm(meta.board)}`;
+    if (!pricedKeys.has(key) && meta.room && meta.board) out.push(makeRate(search, meta, meta.room, meta.board, null, ''));
+  }
+  return dedupe(out).filter((r) => r.room && r.board).slice(0, Number(cfg.max_results) || 1000);
 }
 
 async function searchHadafSource(source, search) {
@@ -143,10 +132,8 @@ async function searchHadafSource(source, search) {
   let password; try { password = decrypt(source.site_password_enc); } catch (error) { return { configured: true, results: [], error: `Credential decryption failed: ${error.message}` }; }
   let browser; let context;
   try {
-    browser = await chromium.launch({ headless: true });
-    context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-    const state = { json: [], jsonResponse: false }; captureJson(context, state);
-    const page = await context.newPage(); page.setDefaultTimeout(Number(cfg.timeout_ms) || 15000);
+    browser = await chromium.launch({ headless: true }); context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const state = { json: [], jsonResponse: false }; captureJson(context, state); const page = await context.newPage(); page.setDefaultTimeout(Number(cfg.timeout_ms) || 15000);
     await page.goto(source.login_url, { waitUntil: 'commit', timeout: 60000 }); await page.waitForTimeout(Number(cfg.initial_wait_ms) || 3000); await blocked(page); await login(page, source, password, cfg);
     await page.goto(cfg.search_page_url || SEARCH_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}); await page.waitForTimeout(Number(cfg.search_page_wait_ms) || 2500);
     const frame = await searchForm(page); if (!frame) throw new Error(`Hadaf hotel search form could not be detected. URL: ${page.url()}`);
@@ -154,9 +141,8 @@ async function searchHadafSource(source, search) {
     const end = Date.now() + (Number(cfg.results_wait_ms) || 90000);
     while (Date.now() < end) { await blocked(page); if (state.jsonResponse && state.json.length) break; await new Promise((resolve) => setTimeout(resolve, 1000)); }
     if (!state.jsonResponse && !context.pages().some((p) => /HotelResults\.aspx/i.test(p.url()))) throw new Error(`Hadaf search did not return results. URL: ${page.url()}`);
-    await page.waitForTimeout(Number(cfg.json_settle_wait_ms) || 10000);
-    const results = await extractRendered(context, cfg, search, state);
-    if (!results.length) throw new Error(`Hadaf returned results but no complete priced rate elements were found. JSON rates: ${state.json.length}. URL: ${page.url()}`);
+    await page.waitForTimeout(Number(cfg.json_settle_wait_ms) || 10000); const results = await extractRendered(context, cfg, search, state);
+    if (!results.length) throw new Error(`Hadaf returned results but no complete hotel rate elements were found. JSON rates: ${state.json.length}. URL: ${page.url()}`);
     return { configured: true, results, error: null };
   } catch (error) { return { configured: true, results: [], error: error.message || String(error) }; }
   finally { try { if (context) await context.close(); } catch (_) {} try { if (browser) await browser.close(); } catch (_) {} }
