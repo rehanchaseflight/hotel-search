@@ -1,0 +1,18 @@
+{
+  "id": "rateloc",
+  "name": "RateLoc",
+  "login_url": "https://www.rateloc.com/",
+  "connector_type": "browser",
+  "enabled": true,
+  "browser_config": {
+    "preset": "rateloc",
+    "username_selector": "input[type=\"email\"]",
+    "password_selector": "input[type=\"password\"]",
+    "login_button_selector": "button:has-text(\"LOGIN\")",
+    "accommodation_tab_text": "Accommodation",
+    "search_button_selector": "button:has-text(\"Search\")",
+    "default_currency": "AED",
+    "max_results": 500,
+    "results_wait_ms": 5000
+  }
+}
