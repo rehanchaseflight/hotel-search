@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer-core');
+﻿const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 const path = require('path');
 
@@ -111,4 +111,5 @@ async function withRezLiveSession(fn) {
   }
 }
 
-module.exports = { connectRezLive, hasRezLiveSession, getRezLiveSessionStatus, withRezLiveSession, STORAGE_PATH };
+module.exports = { connectRezLive, hasRezLiveSession, getRezLiveSessionStatus, withRezLiveSession, STORAGE_PATH, readDevToolsEndpoint };
+

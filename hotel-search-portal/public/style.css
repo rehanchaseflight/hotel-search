@@ -7,7 +7,7 @@ body { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto
 #login-view,#twofa-view { align-items:center; background:linear-gradient(135deg,#0f2747,#1f6feb); }
 .card { background:var(--card); border:1px solid rgba(15,39,71,.08); border-radius:14px; padding:22px 24px; box-shadow:0 8px 30px rgba(15,39,71,.07); margin-bottom:18px; width:100%; }
 #login-view .card,#twofa-view .card { max-width:400px; box-shadow:0 20px 50px rgba(0,0,0,.2); }
-#app-view { display:block; width:100%; max-width:1500px; margin:0 auto; }
+#app-view { display:block; width:100%; max-width:1800px; margin:0 auto; }
 h1 { font-size:1.45rem; margin:0; color:var(--navy); letter-spacing:-.02em; } h2 { font-size:1.08rem; margin:0 0 16px; color:var(--navy); }
 header { display:flex; justify-content:space-between; align-items:center; gap:18px; margin-bottom:18px; padding:16px 20px; background:var(--navy); border-radius:14px; box-shadow:0 8px 24px rgba(15,39,71,.16); } header h1 { color:#fff; } header #who { color:#dce8f7; margin-right:10px; font-size:.9rem; } header button { background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.22); } header button:hover { background:rgba(255,255,255,.22); }
 input,select,textarea,button { padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:.93rem; font-family:inherit; outline:none; transition:border-color .15s,box-shadow .15s,background .15s; } input:focus,select:focus,textarea:focus { border-color:var(--blue); box-shadow:0 0 0 3px rgba(31,111,235,.12); } button { background:var(--blue); color:#fff; border:none; cursor:pointer; font-weight:600; } button:hover { background:var(--blue-dark); } button:disabled { opacity:.6; cursor:not-allowed; }
