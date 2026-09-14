@@ -671,28 +671,357 @@ function renderResults(results,statuses){
 ){
   const td=document.createElement('td');
   const a=document.createElement('a');
-  a.href=String(r.view || r.url);
-  a.textContent='View';
-  a.target='_blank';
-  a.rel='noopener noreferrer';
+
+  a.href='#';
+  a.textContent='View Rates';
   a.className='hotel-view-link';
+
+  a.addEventListener('click',async(ev)=>{
+    ev.preventDefault();
+
+    const hotelName=String(r.hotel||'').trim();
+    const detailUrl=String(r.view||r.url||'').trim();
+
+    a.textContent='Loading...';
+    a.style.pointerEvents='none';
+
+    try{
+      const response=await fetch('/api/wanderbeds/rates',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        credentials:'same-origin',
+        body:JSON.stringify({
+          url:detailUrl,
+          hotel:hotelName
+        })
+      });
+
+      const payload=await response.json();
+
+      if(!response.ok||!payload.ok){
+        throw new Error(
+          payload.error||'Unable to load WanderBeds rates'
+        );
+      }
+
+      const overlay=document.createElement('div');
+
+      overlay.style.cssText=[
+        'position:fixed',
+        'inset:0',
+        'background:rgba(0,0,0,.55)',
+        'z-index:99999',
+        'display:flex',
+        'align-items:center',
+        'justify-content:center',
+        'padding:24px'
+      ].join(';');
+
+      const modal=document.createElement('div');
+
+      modal.style.cssText=[
+        'background:#fff',
+        'border-radius:10px',
+        'width:min(900px,95vw)',
+        'max-height:90vh',
+        'overflow:auto',
+        'padding:24px',
+        'box-shadow:0 20px 60px rgba(0,0,0,.3)'
+      ].join(';');
+
+      const close=document.createElement('button');
+      close.type='button';
+      close.textContent='Close';
+      close.style.cssText='float:right;padding:7px 14px;cursor:pointer';
+
+      close.addEventListener('click',()=>{
+        overlay.remove();
+      });
+
+      const title=document.createElement('h2');
+      title.textContent=hotelName||'WanderBeds Rates';
+
+      modal.appendChild(close);
+      modal.appendChild(title);
+
+      if(!Array.isArray(payload.rates)||!payload.rates.length){
+        const empty=document.createElement('p');
+        empty.textContent='No priced rates were returned by WanderBeds.';
+        modal.appendChild(empty);
+      }else{
+        payload.rates.forEach((rate)=>{
+          const card=document.createElement('div');
+
+          card.style.cssText=[
+            'border:1px solid #ddd',
+            'border-radius:8px',
+            'padding:14px',
+            'margin:12px 0'
+          ].join(';');
+
+          const room=document.createElement('div');
+          room.style.fontWeight='600';
+          room.textContent=rate.room||'Room';
+
+          const meal=document.createElement('div');
+          meal.textContent=rate.meal
+            ?'Meal: '+rate.meal
+            :'Meal: Not specified';
+
+          const cancellation=document.createElement('div');
+          cancellation.textContent=rate.cancellation
+            ?'Cancellation: '+rate.cancellation
+            :'Cancellation: Not specified';
+
+          const deadline=document.createElement('div');
+          deadline.textContent=rate.deadline
+            ?'Deadline: '+rate.deadline
+            :'';
+
+          const nightly=document.createElement('div');
+          nightly.style.fontWeight='600';
+          nightly.textContent=
+            'USD '+Number(rate.price||0).toFixed(2)+' / night';
+
+          const total=document.createElement('div');
+
+          if(rate.total_price!=null){
+            total.textContent=
+              'USD '+Number(rate.total_price).toLocaleString(
+                undefined,
+                {
+                  minimumFractionDigits:2,
+                  maximumFractionDigits:2
+                }
+              )+
+              ' total'+
+              (rate.nights
+                ?' · '+rate.nights+' nights'
+                :'');
+          }
+
+          card.appendChild(room);
+          card.appendChild(meal);
+          card.appendChild(cancellation);
+
+          if(rate.deadline){
+            card.appendChild(deadline);
+          }
+
+          card.appendChild(nightly);
+
+          if(rate.total_price!=null){
+            card.appendChild(total);
+          }
+
+          modal.appendChild(card);
+        });
+      }
+
+      overlay.appendChild(modal);
+
+      overlay.addEventListener('click',(ev)=>{
+        if(ev.target===overlay){
+          overlay.remove();
+        }
+      });
+
+      document.body.appendChild(overlay);
+
+    }catch(error){
+      alert(
+        'WanderBeds rates could not be loaded: '+
+        String(error&&error.message||error)
+      );
+    }finally{
+      a.textContent='View Rates';
+      a.style.pointerEvents='';
+    }
+  });
+
   td.appendChild(a);
   tr.appendChild(td);
+
 }else{
   const viewValue=String(r.view||r.url||'').trim();
+
 if(
   /wanderbeds/i.test(String(r.supplier||r.source||'')) &&
   /^https?:\/\/(?:www\.)?wanderbeds\.com\/book\/\d+\/hoteldetails\//i.test(viewValue)
 ){
   const td=document.createElement('td');
   const a=document.createElement('a');
-  a.href=viewValue;
-  a.textContent='View';
-  a.target='_blank';
-  a.rel='noopener noreferrer';
+
+  a.href='#';
+  a.textContent='View Rates';
   a.className='hotel-view-link';
+
+  a.addEventListener('click',async(ev)=>{
+    ev.preventDefault();
+
+    const hotelName=String(r.hotel||'').trim();
+    const detailUrl=String(r.view||r.url||'').trim();
+
+    a.textContent='Loading...';
+    a.style.pointerEvents='none';
+
+    try{
+      const response=await fetch('/api/wanderbeds/rates',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        credentials:'same-origin',
+        body:JSON.stringify({
+          url:detailUrl,
+          hotel:hotelName
+        })
+      });
+
+      const payload=await response.json();
+
+      if(!response.ok||!payload.ok){
+        throw new Error(
+          payload.error||'Unable to load WanderBeds rates'
+        );
+      }
+
+      const overlay=document.createElement('div');
+
+      overlay.style.cssText=[
+        'position:fixed',
+        'inset:0',
+        'background:rgba(0,0,0,.55)',
+        'z-index:99999',
+        'display:flex',
+        'align-items:center',
+        'justify-content:center',
+        'padding:24px'
+      ].join(';');
+
+      const modal=document.createElement('div');
+
+      modal.style.cssText=[
+        'background:#fff',
+        'border-radius:10px',
+        'width:min(900px,95vw)',
+        'max-height:90vh',
+        'overflow:auto',
+        'padding:24px',
+        'box-shadow:0 20px 60px rgba(0,0,0,.3)'
+      ].join(';');
+
+      const close=document.createElement('button');
+      close.type='button';
+      close.textContent='Close';
+      close.style.cssText='float:right;padding:7px 14px;cursor:pointer';
+
+      close.addEventListener('click',()=>{
+        overlay.remove();
+      });
+
+      const title=document.createElement('h2');
+      title.textContent=hotelName||'WanderBeds Rates';
+
+      modal.appendChild(close);
+      modal.appendChild(title);
+
+      if(!Array.isArray(payload.rates)||!payload.rates.length){
+        const empty=document.createElement('p');
+        empty.textContent='No priced rates were returned by WanderBeds.';
+        modal.appendChild(empty);
+      }else{
+        payload.rates.forEach((rate)=>{
+          const card=document.createElement('div');
+
+          card.style.cssText=[
+            'border:1px solid #ddd',
+            'border-radius:8px',
+            'padding:14px',
+            'margin:12px 0'
+          ].join(';');
+
+          const room=document.createElement('div');
+          room.style.fontWeight='600';
+          room.textContent=rate.room||'Room';
+
+          const meal=document.createElement('div');
+          meal.textContent=rate.meal
+            ?'Meal: '+rate.meal
+            :'Meal: Not specified';
+
+          const cancellation=document.createElement('div');
+          cancellation.textContent=rate.cancellation
+            ?'Cancellation: '+rate.cancellation
+            :'Cancellation: Not specified';
+
+          const deadline=document.createElement('div');
+          deadline.textContent=rate.deadline
+            ?'Deadline: '+rate.deadline
+            :'';
+
+          const nightly=document.createElement('div');
+          nightly.style.fontWeight='600';
+          nightly.textContent=
+            'USD '+Number(rate.price||0).toFixed(2)+' / night';
+
+          const total=document.createElement('div');
+
+          if(rate.total_price!=null){
+            total.textContent=
+              'USD '+Number(rate.total_price).toLocaleString(
+                undefined,
+                {
+                  minimumFractionDigits:2,
+                  maximumFractionDigits:2
+                }
+              )+
+              ' total'+
+              (rate.nights
+                ?' · '+rate.nights+' nights'
+                :'');
+          }
+
+          card.appendChild(room);
+          card.appendChild(meal);
+          card.appendChild(cancellation);
+
+          if(rate.deadline){
+            card.appendChild(deadline);
+          }
+
+          card.appendChild(nightly);
+
+          if(rate.total_price!=null){
+            card.appendChild(total);
+          }
+
+          modal.appendChild(card);
+        });
+      }
+
+      overlay.appendChild(modal);
+
+      overlay.addEventListener('click',(ev)=>{
+        if(ev.target===overlay){
+          overlay.remove();
+        }
+      });
+
+      document.body.appendChild(overlay);
+
+    }catch(error){
+      alert(
+        'WanderBeds rates could not be loaded: '+
+        String(error&&error.message||error)
+      );
+    }finally{
+      a.textContent='View Rates';
+      a.style.pointerEvents='';
+    }
+  });
+
   td.appendChild(a);
   tr.appendChild(td);
+
 }else{
   addCell(tr,r.view);
 }
@@ -853,4 +1182,5 @@ $('s-nights').addEventListener('input',syncCheckout);
 $('s-checkout').addEventListener('change',syncNights);
 $('search-form').addEventListener('submit',async e=>{e.preventDefault();syncNights();const supplierIds=getSelectedSupplierIds();if(!supplierIds.length){$('supplier-status').innerHTML='<p class="error">Select at least one supplier.</p>';return;}const button=e.target.querySelector('button[type="submit"]');button.disabled=true;button.textContent='Searchingâ€¦';show('results-section');$('search-summary').textContent=`${$('s-destination').value} â€¢ ${$('s-checkin').value} to ${$('s-checkout').value} â€¢ ${$('s-adults').value} adults â€¢ ${$('s-children').value} children â€¢ ${$('s-rooms').value} room${Number($('s-rooms').value)===1?'':'s'}`;$('supplier-status').innerHTML='<div class="searching-status">Searching live suppliersâ€¦</div>';$('live-results').innerHTML='<p class="hint">Waiting for live supplier ratesâ€¦</p>';try{const d=await api('/api/search',{method:'POST',body:JSON.stringify({destination:$('s-destination').value.trim(),destinationCountry:$('s-destination-country').value.trim(),checkin:$('s-checkin').value,checkout:$('s-checkout').value,guests:Number($('s-adults').value),rooms:Number($('s-rooms').value),board:'ROOM_ONLY',country:$('s-country').value,nights:Number($('s-nights').value),children:Number($('s-children').value),hotelName:$('s-hotel').value.trim(),supplierIds:getSelectedSupplierIds()})});currentSearchId=d.searchId;renderResults(d.results,d.connectorStatuses)}catch(err){$('supplier-status').innerHTML='';$('live-results').innerHTML=`<p class="error">${err.message}</p>`}finally{button.disabled=false;button.textContent='Search Hotels'}});
 (async()=>{try{const me=await api('/api/auth/me');$('who').textContent=me.username;hide('login-view');show('app-view');applyRole(me.role);await loadSources();loadSupplierHealth()}catch{}})();
+
 

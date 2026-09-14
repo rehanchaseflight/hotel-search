@@ -118,7 +118,45 @@ if(path==='/api/supplier-health'&&method==='GET'){try{const r=await db.query("SE
  if(path.startsWith('/api/sources/')&&method==='PUT'){if(!allowed(staff.role,'SUPER_ADMIN','ADMIN'))return json({error:'Insufficient permissions'},403);const id=path.split('/').pop();try{const{name,login_url,site_username,site_password,agent_code,enabled,browser_config}=await body(req);const current=await db.query('SELECT * FROM sources WHERE id=$1',[id]);if(!current.rows[0])return json({error:'Supplier not found'},404);const s=current.rows[0];const passwordEnc=site_password?encrypt(String(site_password)):s.site_password_enc;await db.query('UPDATE sources SET name=$1,login_url=$2,site_username=$3,site_password_enc=$4,agent_code=$5,enabled=$6,browser_config=$7 WHERE id=$8',[String(name||s.name).slice(0,120),String(login_url||s.login_url),String(site_username ?? s.site_username ?? ''),passwordEnc,String(agent_code ?? s.agent_code ?? ''),enabled!==undefined?Boolean(enabled):s.enabled,JSON.stringify(browser_config||s.browser_config||{}) ,id]);return json({ok:true})}catch(e){console.error(e);return json({error:'Could not update supplier'},500)}}
  if(path==='/api/sources'&&method==='POST'){if(!allowed(staff.role,'SUPER_ADMIN','ADMIN'))return json({error:'Insufficient permissions'},403);try{const{name,login_url,deep_link_template,site_username,site_password,agent_code,connector_type='api',enabled=true,browser_config={}}=await body(req);if(!name||!login_url)return json({error:'Name and login URL are required'},400);try{new URL(login_url)}catch{return json({error:'Invalid login URL'},400)}if(!['api','browser','playwright','manual'].includes(connector_type))return json({error:'Invalid connector type'},400);if(connector_type==='browser'||connector_type==='playwright'){if(!site_username||!site_password)return json({error:'Browser connector requires username and password'},400);if(typeof browser_config!=='object'||Array.isArray(browser_config))return json({error:'browser_config must be an object'},400)}const r=await db.query('INSERT INTO sources(name,login_url,deep_link_template,site_username,site_password_enc,agent_code,connector_type,enabled,browser_config) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',[name.slice(0,120),login_url,deep_link_template||'',site_username||'',encrypt(site_password||''),agent_code||'',connector_type,Boolean(enabled),JSON.stringify(browser_config||{})]);return json({id:r.rows[0].id})}catch(e){console.error(e);return json({error:'Could not save source. Please check the source details and try again.'},500)}}
  if(path.startsWith('/api/sources/')&&method==='DELETE'){if(!allowed(staff.role,'SUPER_ADMIN','ADMIN'))return json({error:'Insufficient permissions'},403);await db.query('DELETE FROM sources WHERE id=$1',[path.split('/').pop()]);return json({ok:true})}
- if(path==='/api/search'&&method==='POST'){try{const{destination,destinationCountry='',checkin,checkout,guests,rooms=1,board='ROOM_ONLY',hotelName='',hotel_name='',supplierIds=[]}=await body(req);if(!validSearch({destination,checkin,checkout,guests,rooms,board}))return json({error:'Check destination, dates, guests, rooms and board'},400);const hotelFilter=String(hotelName||hotel_name||'').trim().slice(0,120);const r=await db.query('INSERT INTO searches(staff_id,destination,checkin,checkout,guests,rooms,board) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',[staff.staffId,destination.trim(),checkin,checkout,Number(guests),Number(rooms),board]);const s=await db.query('SELECT id,name,login_url,deep_link_template,site_username,site_password_enc,agent_code,connector_type,enabled,browser_config FROM sources ORDER BY name');
+ if(path==='/api/wanderbeds/rates'&&method==='POST'){
+  try{
+    const{url,hotel}=await body(req);
+
+    if(
+      !url ||
+      !/^https?:\/\/(?:www\.)?wanderbeds\.com\/book\/\d+\/hoteldetails\//i.test(
+        String(url)
+      )
+    ){
+      return json({error:'Invalid WanderBeds hotel details URL'},400);
+    }
+
+    const sourceResult=await db.query(
+      "SELECT id,name FROM sources WHERE enabled=true AND LOWER(name) LIKE '%wanderbeds%' ORDER BY id LIMIT 1"
+    );
+
+    if(!sourceResult.rows[0]){
+      return json({error:'WanderBeds supplier is not enabled'},404);
+    }
+
+    const wb=require('./connectors/wanderbeds-browser-v1');
+
+    const result=await wb.getWanderBedsRates(
+      String(url),
+      {hotel:String(hotel||'').trim()}
+    );
+
+    return json(result);
+  }catch(e){
+    console.error('WANDERBEDS RATES ERROR:',e);
+    return json({
+      ok:false,
+      error:String(e&&e.message||e||'WanderBeds rates failed')
+    },500);
+  }
+}
+
+if(path==='/api/search'&&method==='POST'){try{const{destination,destinationCountry='',checkin,checkout,guests,rooms=1,board='ROOM_ONLY',hotelName='',hotel_name='',supplierIds=[]}=await body(req);if(!validSearch({destination,checkin,checkout,guests,rooms,board}))return json({error:'Check destination, dates, guests, rooms and board'},400);const hotelFilter=String(hotelName||hotel_name||'').trim().slice(0,120);const r=await db.query('INSERT INTO searches(staff_id,destination,checkin,checkout,guests,rooms,board) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',[staff.staffId,destination.trim(),checkin,checkout,Number(guests),Number(rooms),board]);const s=await db.query('SELECT id,name,login_url,deep_link_template,site_username,site_password_enc,agent_code,connector_type,enabled,browser_config FROM sources ORDER BY name');
 const selectedSupplierIds=Array.isArray(supplierIds)
   ? supplierIds.map(x=>Number(x)).filter(Number.isInteger)
   : [];

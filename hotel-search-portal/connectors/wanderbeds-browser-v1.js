@@ -1,4 +1,4 @@
-const { chromium } = require('playwright');
+﻿const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 const { decrypt } = require('../crypto-util');
@@ -3116,9 +3116,7 @@ async function isWanderBedsLoggedIn(page) {
 
   if (dashboardControls > 0) return true;
 
-  const text = await bodyText(page);
-
-  return /destination|check.?in|check.?out|1 room|search/i.test(text);
+  return false;
 }
 
 async function waitForWanderBedsManualLogin(page, timeoutMs = 180000) {
@@ -3190,6 +3188,340 @@ async function completeWanderBedsManualLogin(timeoutMs = 180000) {
     url: wanderBedsPage.url()
   };
 }
+
+async function getWanderBedsRates(hotelDetailsUrl, search = {}) {
+  if (
+    !/^https?:\/\/(?:www\.)?wanderbeds\.com\/book\/\d+\/hoteldetails\//i.test(
+      String(hotelDetailsUrl || "")
+    )
+  ) {
+    throw new Error("Invalid WanderBeds hotel details URL");
+  }
+
+  if (!wanderBedsPage || !wanderBedsContext) {
+    throw new Error("WanderBeds browser session is not available");
+  }
+
+  await blocked(wanderBedsPage);
+
+  const ratePage = await wanderBedsContext.newPage();
+
+  try {
+    ratePage.setDefaultTimeout(20000);
+
+    const detailPayloadResult = await wanderBedsPage.evaluate(async (url) => {
+      try {
+        const response = await fetch(url, {
+          credentials: "include"
+        });
+
+        const text = await response.text();
+
+        let payload = null;
+
+        try {
+          payload = JSON.parse(text);
+        } catch (_) {}
+
+        return {
+          ok: response.ok,
+          status: response.status,
+          payload,
+          text: text.slice(0, 5000)
+        };
+      } catch (e) {
+        return {
+          ok: false,
+          status: 0,
+          payload: null,
+          text: String(e && e.message || e || "")
+        };
+      }
+    }, String(hotelDetailsUrl));
+
+    console.log("WANDERBEDS DETAIL RESPONSE DEBUG:", JSON.stringify({
+      status: detailPayloadResult.status,
+      ok: detailPayloadResult.ok,
+      hasPayload: !!detailPayloadResult.payload,
+      payloadKeys: detailPayloadResult.payload
+        ? Object.keys(detailPayloadResult.payload)
+        : [],
+      payloadHtmlKeys:
+        detailPayloadResult.payload &&
+        detailPayloadResult.payload.html
+          ? Object.keys(detailPayloadResult.payload.html)
+          : [],
+      responsePreview: String(detailPayloadResult.text || "").slice(0, 2000)
+    }, null, 2));
+
+    if (!detailPayloadResult.ok) {
+      throw new Error(
+        "WanderBeds hotel details request failed: HTTP " +
+        detailPayloadResult.status +
+        (detailPayloadResult.text
+          ? " - " + detailPayloadResult.text.slice(0, 300)
+          : "")
+      );
+    }
+
+    const detailPayload = detailPayloadResult.payload;
+
+    const modalHtml =
+      detailPayload &&
+      detailPayload.html &&
+      detailPayload.html[".modal-content"];
+
+    if (!modalHtml) {
+      throw new Error(
+        "WanderBeds hotel details HTML was not returned. " +
+        "Response preview: " +
+        String(detailPayloadResult.text || "").slice(0, 500)
+      );
+    }
+
+    await ratePage.setContent(
+      "<!doctype html><html><body>" +
+      modalHtml +
+      "</body></html>",
+      { waitUntil: "domcontentloaded" }
+    );
+
+    const roomsHref = await ratePage.locator("a[href]").evaluateAll(
+      (anchors) => {
+        for (const a of anchors) {
+          const href = String(a.href || "");
+          const text = (a.innerText || a.textContent || "")
+            .replace(/\s+/g, " ")
+            .trim();
+
+          if (
+            /\/book\/\d+\/rooms\//i.test(href) &&
+            /view\s*rates|rates|rooms/i.test(text)
+          ) {
+            return href;
+          }
+        }
+
+        for (const a of anchors) {
+          const href = String(a.href || "");
+
+          if (/\/book\/\d+\/rooms\//i.test(href)) {
+            return href;
+          }
+        }
+
+        return "";
+      }
+    );
+
+    if (!roomsHref) {
+      throw new Error("WanderBeds View Rates / rooms link was not found");
+    }
+
+    const absoluteRoomsHref = new URL(
+      roomsHref,
+      "https://wanderbeds.com"
+    ).href;
+
+    await ratePage.goto(absoluteRoomsHref, {
+      waitUntil: "domcontentloaded",
+      timeout: 60000
+    });
+
+    await ratePage.waitForTimeout(1500);
+    await blocked(ratePage);
+
+    const rateLinks = await ratePage.locator("a[href]").evaluateAll(
+      (anchors) => {
+        const found = [];
+        const seen = new Set();
+
+        for (const a of anchors) {
+          const href = String(a.href || "");
+          const text = (a.innerText || a.textContent || "")
+            .replace(/\s+/g, " ")
+            .trim();
+
+          if (
+            /\/book\/\d+\/roomrates\//i.test(href) ||
+            /more\s*rates/i.test(text)
+          ) {
+            if (
+              href &&
+              !seen.has(href) &&
+              /wanderbeds\.com/i.test(href)
+            ) {
+              seen.add(href);
+              found.push(href);
+            }
+          }
+        }
+
+        return found;
+      }
+    );
+
+    const uniqueRateLinks = [...new Set(rateLinks)];
+
+    if (!uniqueRateLinks.length) {
+      throw new Error("WanderBeds More Rates links were not found");
+    }
+
+    const rates = [];
+
+    for (const ratesUrl of uniqueRateLinks) {
+      try {
+        ratePage.setDefaultTimeout(20000);
+
+        await ratePage.goto(ratesUrl, {
+          waitUntil: "domcontentloaded",
+          timeout: 60000
+        });
+
+        await ratePage.waitForTimeout(1000);
+        await blocked(ratePage);
+
+        const bodyText = await ratePage.locator("body")
+          .innerText()
+          .catch(() => "");
+
+        const text = bodyText.replace(/\s+/g, " ").trim();
+
+        const avgMatch = text.match(
+          /([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(USD|US\$|\$)\s*avg\/night/i
+        );
+
+        const totalMatch = text.match(
+          /([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(USD|US\$|\$)\s*total\s+for\s+([0-9]+)\s+nights?/i
+        );
+
+        if (!avgMatch && !totalMatch) {
+          continue;
+        }
+
+        let price = avgMatch
+          ? Number(avgMatch[1].replace(/,/g, ""))
+          : null;
+
+        const totalPrice = totalMatch
+          ? Number(totalMatch[1].replace(/,/g, ""))
+          : null;
+
+        const nights = totalMatch
+          ? Number(totalMatch[3])
+          : null;
+
+        if (
+          price == null &&
+          totalPrice != null &&
+          nights > 0
+        ) {
+          price = totalPrice / nights;
+        }
+
+        if (
+          price == null ||
+          !Number.isFinite(price) ||
+          price <= 0
+        ) {
+          continue;
+        }
+
+        const mealMatch = text.match(
+          /Meal\s*:\s*([^]+?)(?=\s+Deadline\s*:|\s+[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*(?:USD|US\$|\$))/i
+        );
+
+        const cancellationMatch = text.match(
+          /Non[- ]?refundable|Free Cancellation|Refundable/i
+        );
+
+        const deadlineMatch = text.match(
+          /Deadline\s*:\s*([^]+?)(?=\s+(?:Non[- ]?refundable|Free Cancellation|Refundable)|\s+[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*(?:USD|US\$|\$))/i
+        );
+
+        let room = "";
+
+        const roomTitle = await ratePage.locator(
+          ".card:visible h5.card-title"
+        ).first().innerText().catch(() => "");
+
+        if (roomTitle) {
+          room = roomTitle
+            .replace(/\s+/g, " ")
+            .trim();
+        }
+
+        if (!room) {
+          const roomMatch = text.match(
+            /(?:Room Type|Room)\s*:\s*([^]+?)(?=\s+(?:Meal|Deadline|Non[- ]?refundable|Free Cancellation|Refundable)\s*:|\s+[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*(?:USD|US\$|\$))/i
+          );
+
+          if (roomMatch) {
+            room = roomMatch[1]
+              .replace(/\s+/g, " ")
+              .trim();
+          }
+        }
+
+        if (!room || room.length > 180) {
+          room = String(search.hotel || "Hotel rate").trim();
+        }
+
+        rates.push({
+          hotel: String(search.hotel || "").trim(),
+          room,
+          meal: mealMatch ? mealMatch[1].trim() : "",
+          cancellation: cancellationMatch
+            ? cancellationMatch[0].trim()
+            : "",
+          deadline: deadlineMatch
+            ? deadlineMatch[1].trim()
+            : "",
+          price,
+          currency: "USD",
+          total_price: totalPrice,
+          nights,
+          url: ratesUrl,
+          view: ratesUrl,
+          source: "wanderbeds"
+        });
+      } catch (e) {
+        console.log(
+          "WanderBeds: rate page extraction failed:",
+          String(e && e.message || e || "")
+        );
+      }
+    }
+    const uniqueRates = [];
+    const seen = new Set();
+
+    for (const rate of rates) {
+      const key = [
+        rate.room,
+        rate.meal,
+        rate.cancellation,
+        rate.deadline,
+        rate.price,
+        rate.total_price
+      ].join("|");
+
+      if (seen.has(key)) continue;
+
+      seen.add(key);
+      uniqueRates.push(rate);
+    }
+
+    return {
+      ok: true,
+      hotel: String(search.hotel || "").trim(),
+      roomsUrl: roomsHref,
+      rates: uniqueRates
+    };
+  } finally {
+    await ratePage.close().catch(() => {});
+  }
+}
+
 async function searchWanderBedsSource(source, search) {
   const cfg = source.browser_config || {};
 
@@ -3374,5 +3706,18 @@ module.exports = {
   openWanderBedsManualLogin,
   completeWanderBedsManualLogin,
   isWanderBedsLoggedIn,
-  wanderBedsManualLoginStatus
+  wanderBedsManualLoginStatus,
+  getWanderBedsRates
 };
+
+
+
+
+
+
+
+
+
+
+
+
