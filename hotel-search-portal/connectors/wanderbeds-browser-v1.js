@@ -1,4 +1,4 @@
-﻿const { chromium } = require('playwright');
+const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 const { decrypt } = require('../crypto-util');
@@ -2625,7 +2625,27 @@ async function extractResults(page, search, cfg) {
         paginationPage + 1
       );
 
-      await fallbackNext.click();
+      try {
+        await fallbackNext.click({ timeout: 5000 });
+      } catch (clickErr) {
+        const msg = String(clickErr && clickErr.message || clickErr);
+
+        if (!/detached from the DOM|element was detached/i.test(msg)) {
+          throw clickErr;
+        }
+
+        console.log(
+          "WanderBeds: fallback Next detached during click; retrying with fresh locator."
+        );
+
+        const freshFallbackNext = page.locator(
+          '[class*="table_book_hotels_"][class*="_pager"] nav a'
+        ).filter({
+          hasText: /next/i
+        }).first();
+
+        await freshFallbackNext.dispatchEvent("click");
+      }
     } else {
       await nextControl.scrollIntoViewIfNeeded().catch(() => {});
 
@@ -2634,7 +2654,26 @@ async function extractResults(page, search, cfg) {
         paginationPage + 1
       );
 
-      await nextControl.click();
+      try {
+        await nextControl.click({ timeout: 5000 });
+      } catch (clickErr) {
+        const msg = String(clickErr && clickErr.message || clickErr);
+
+        if (!/detached from the DOM|element was detached/i.test(msg)) {
+          throw clickErr;
+        }
+
+        console.log(
+          "WanderBeds: actual Next detached during click; retrying with fresh locator."
+        );
+
+        const freshNextControl = page.locator(
+          '[class*="table_book_hotels_"][class*="_pager"] nav ul li:has(i.bi-arrow-right) a, ' +
+          '[class*="table_book_hotels_"][class*="_pager"] nav ul li:has(i[class*="arrow-right"]) a'
+        ).first();
+
+        await freshNextControl.dispatchEvent("click");
+      }
     }
 
     /*
@@ -3337,70 +3376,3 @@ module.exports = {
   isWanderBedsLoggedIn,
   wanderBedsManualLoginStatus
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

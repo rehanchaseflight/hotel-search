@@ -1,4 +1,4 @@
-﻿const { chromium } = require('playwright');
+const { chromium } = require('playwright');
 const { decrypt } = require('../crypto-util');
 const rezliveSession = require('./rezlive-session');
 
@@ -3215,7 +3215,7 @@ console.log(
 async function searchBrowserSource(source,search){
   const cfg=source.browser_config||{};if(!source.login_url||!source.site_username||!source.site_password_enc)return{configured:false,results:[],error:null};
   let password;try{password=decrypt(source.site_password_enc);}catch(e){return{configured:true,results:[],error:`Credential decryption failed: ${e.message}`};}
-  let browser=null,context=null;
+  let browser=null,context=null,rezliveCdpConnected=false;
   try{
     console.log(
       "REZLIVE SESSION CHECK:",
@@ -3232,7 +3232,8 @@ async function searchBrowserSource(source,search){
       }, null, 2)
     );
     if(cfg.preset==='rezlive'&&rezliveSession.hasRezLiveSession()){
-      browser=await chromium.connectOverCDP(rezliveSession.readDevToolsEndpoint());context=browser.contexts()[0];if(!context)throw new Error('RezLive Chrome context not found');const pages=context.pages();console.log("REZLIVE CHROME PAGES:");for(let i=0;i<pages.length;i++){try{console.log(`  PAGE ${i}: ${pages[i].url()}`)}catch(e){console.log(`  PAGE ${i}: <url-error>`)}}let page=pages.find(p=>{try{return /^https?:\/\/([^/]+\.)?rezlive\.com/i.test(p.url())}catch(e){return false}});if(!page){page=pages.find(p=>{try{return /rezlive\.com/i.test(new URL(p.url()).hostname)}catch(e){return false}})}if(!page){console.log("REZLIVE: no existing RezLive tab found; creating fresh tab.");page=await context.newPage();await page.goto("https://www.rezlive.com/common/index",{waitUntil:"domcontentloaded",timeout:30000})}console.log("REZLIVE SELECTED PAGE:",page.url());page.setDefaultTimeout(Math.max(Number(cfg.timeout_ms)||12000,60000));const rezSearch={...search}; const rows=await searchRezLive(page,rezSearch,{...cfg,_authenticated:true});return{configured:true,results:rows.map((r,i)=>({id:`${source.id}-${i}`,supplier:source.name,hotel:r.hotel||'Hotel',room:r.room||'',view:r.view||'',board:r.board||search.board||'',cancellation:r.cancellation||'',price:Number.isFinite(r.price)?r.price:number(r.price),currency:r.currency||cfg.default_currency||'',availability:r.availability||'',raw:r.raw||r})).filter(r=>Number.isFinite(r.price)&&r.price>0),error:null};
+      browser=await chromium.connectOverCDP(rezliveSession.readDevToolsEndpoint());
+      rezliveCdpConnected=true;context=browser.contexts()[0];if(!context)throw new Error('RezLive Chrome context not found');const pages=context.pages();console.log("REZLIVE CHROME PAGES:");for(let i=0;i<pages.length;i++){try{console.log(`  PAGE ${i}: ${pages[i].url()}`)}catch(e){console.log(`  PAGE ${i}: <url-error>`)}}let page=pages.find(p=>{try{return /^https?:\/\/([^/]+\.)?rezlive\.com/i.test(p.url())}catch(e){return false}});if(!page){page=pages.find(p=>{try{return /rezlive\.com/i.test(new URL(p.url()).hostname)}catch(e){return false}})}if(!page){console.log("REZLIVE: no existing RezLive tab found; creating fresh tab.");page=await context.newPage();await page.goto("https://www.rezlive.com/common/index",{waitUntil:"domcontentloaded",timeout:30000})}console.log("REZLIVE SELECTED PAGE:",page.url());page.setDefaultTimeout(Math.max(Number(cfg.timeout_ms)||12000,60000));const rezSearch={...search}; const rows=await searchRezLive(page,rezSearch,{...cfg,_authenticated:true});return{configured:true,results:rows.map((r,i)=>({id:`${source.id}-${i}`,supplier:source.name,hotel:r.hotel||'Hotel',room:r.room||'',view:r.view||'',board:r.board||search.board||'',cancellation:r.cancellation||'',price:Number.isFinite(r.price)?r.price:number(r.price),currency:r.currency||cfg.default_currency||'',availability:r.availability||'',raw:r.raw||r})).filter(r=>Number.isFinite(r.price)&&r.price>0),error:null};
     }
     browser=await chromium.launch({headless:true});context=await browser.newContext({viewport:{width:1440,height:1000}});const page=await context.newPage();page.setDefaultTimeout(Number(cfg.timeout_ms)||12000);await page.goto(source.login_url,{waitUntil:'domcontentloaded',timeout:30000});
     if(cfg.preset==='rezlive'){const rows=await searchRezLive(page,search,{...cfg,_username:source.site_username,_password:password});return{configured:true,results:rows.map((r,i)=>({id:`${source.id}-${i}`,supplier:source.name,hotel:r.hotel||'Hotel',room:r.room||'',view:r.view||'',board:r.board||search.board||'',cancellation:r.cancellation||'',price:Number.isFinite(r.price)?r.price:number(r.price),currency:r.currency||cfg.default_currency||'',availability:r.availability||'',raw:r.raw||r})).filter(r=>Number.isFinite(r.price)&&r.price>0),error:null};}
@@ -3316,81 +3317,21 @@ async function searchBrowserSource(source,search){
       : e.message
   };
 }finally{
-  if(context)await context.close().catch(()=>{});
-  if(browser)await browser.close().catch(()=>{});
+  if(rezliveCdpConnected){
+    try{
+      if(browser&&browser.isConnected()){
+        console.log("RezLive: search complete; disconnecting Playwright from external Chrome.");
+        await browser.close();
+        console.log("RezLive: Playwright disconnected; external Chrome left running.");
+      }
+    }catch(e){
+      console.log("RezLive: CDP disconnect cleanup error:",e.message);
+    }
+  }else{
+    if(context)await context.close().catch(()=>{});
+    if(browser)await browser.close().catch(()=>{});
+  }
 }
 }
 
 module.exports={searchBrowserSource,fillTemplate};
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

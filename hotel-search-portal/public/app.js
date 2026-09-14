@@ -1,4 +1,4 @@
-﻿let tempToken=null,currentSearchId=null,currentSources=[];
+﻿﻿let tempToken=null,currentSearchId=null,currentSources=[];
 const $=id=>document.getElementById(id),show=id=>$(id).classList.remove("hidden"),hide=id=>$(id).classList.add("hidden");
 
 (function setupDestinationAutocomplete(){
@@ -665,7 +665,38 @@ function renderResults(results,statuses){
         addCell(tr,r.hotel,index===0?'hotel-group-name':'');
         addCell(tr,r.room);
         addCell(tr,r.category);
-        addCell(tr,r.view);
+        if(
+  /wanderbeds/i.test(String(r.supplier || r.source || "")) &&
+  /^https?:\/\/[^/]*wanderbeds\.com\/book\/1\/hoteldetails\//i.test(String(r.view || r.url || ""))
+){
+  const td=document.createElement('td');
+  const a=document.createElement('a');
+  a.href=String(r.view || r.url);
+  a.textContent='View';
+  a.target='_blank';
+  a.rel='noopener noreferrer';
+  a.className='hotel-view-link';
+  td.appendChild(a);
+  tr.appendChild(td);
+}else{
+  const viewValue=String(r.view||r.url||'').trim();
+if(
+  /wanderbeds/i.test(String(r.supplier||r.source||'')) &&
+  /^https?:\/\/(?:www\.)?wanderbeds\.com\/book\/\d+\/hoteldetails\//i.test(viewValue)
+){
+  const td=document.createElement('td');
+  const a=document.createElement('a');
+  a.href=viewValue;
+  a.textContent='View';
+  a.target='_blank';
+  a.rel='noopener noreferrer';
+  a.className='hotel-view-link';
+  td.appendChild(a);
+  tr.appendChild(td);
+}else{
+  addCell(tr,r.view);
+}
+}
         addCell(tr,r.board);
         addCell(tr,r.cancellation);
 
@@ -822,23 +853,4 @@ $('s-nights').addEventListener('input',syncCheckout);
 $('s-checkout').addEventListener('change',syncNights);
 $('search-form').addEventListener('submit',async e=>{e.preventDefault();syncNights();const supplierIds=getSelectedSupplierIds();if(!supplierIds.length){$('supplier-status').innerHTML='<p class="error">Select at least one supplier.</p>';return;}const button=e.target.querySelector('button[type="submit"]');button.disabled=true;button.textContent='Searchingâ€¦';show('results-section');$('search-summary').textContent=`${$('s-destination').value} â€¢ ${$('s-checkin').value} to ${$('s-checkout').value} â€¢ ${$('s-adults').value} adults â€¢ ${$('s-children').value} children â€¢ ${$('s-rooms').value} room${Number($('s-rooms').value)===1?'':'s'}`;$('supplier-status').innerHTML='<div class="searching-status">Searching live suppliersâ€¦</div>';$('live-results').innerHTML='<p class="hint">Waiting for live supplier ratesâ€¦</p>';try{const d=await api('/api/search',{method:'POST',body:JSON.stringify({destination:$('s-destination').value.trim(),destinationCountry:$('s-destination-country').value.trim(),checkin:$('s-checkin').value,checkout:$('s-checkout').value,guests:Number($('s-adults').value),rooms:Number($('s-rooms').value),board:'ROOM_ONLY',country:$('s-country').value,nights:Number($('s-nights').value),children:Number($('s-children').value),hotelName:$('s-hotel').value.trim(),supplierIds:getSelectedSupplierIds()})});currentSearchId=d.searchId;renderResults(d.results,d.connectorStatuses)}catch(err){$('supplier-status').innerHTML='';$('live-results').innerHTML=`<p class="error">${err.message}</p>`}finally{button.disabled=false;button.textContent='Search Hotels'}});
 (async()=>{try{const me=await api('/api/auth/me');$('who').textContent=me.username;hide('login-view');show('app-view');applyRole(me.role);await loadSources();loadSupplierHealth()}catch{}})();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
