@@ -1,5 +1,5 @@
-if(!process.env.CLOUDFLARE)require('dotenv').config();
-const bcrypt=require('bcryptjs');const jwt=require('jsonwebtoken');const speakeasy=require('speakeasy');const db=require('./db');const {encrypt}=require('./crypto-util');const connectors=require('./connectors');
+﻿if(!process.env.CLOUDFLARE)require('dotenv').config();
+const bcrypt=require('bcryptjs');const jwt=require('jsonwebtoken');const speakeasy=require('speakeasy');const db=require('./db');const {encrypt}=require('./crypto-util');const connectors=require('./connectors');const geo=require('countrycitystatejson');
 const JWT_SECRET=process.env.JWT_SECRET;if(!JWT_SECRET||JWT_SECRET.length<32)throw new Error('JWT_SECRET must be at least 32 characters');
 const loginAttempts=new Map();const BOARDS=['ROOM_ONLY','BED_AND_BREAKFAST','HALF_BOARD','FULL_BOARD','ALL_INCLUSIVE'];const jsonHeaders={'content-type':'application/json; charset=utf-8','cache-control':'no-store'};
 function json(data,status=200,extra={}){return new Response(JSON.stringify(data),{status,headers:{...jsonHeaders,...extra}})}function htmlHeaders(){return{'content-type':'text/html; charset=utf-8'}}
@@ -13,20 +13,192 @@ function rateLimited(req){const key=req.headers.get('cf-connecting-ip')||req.hea
 function base32ToBytes(input){const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';const clean=String(input||'').replace(/=+$/,'').toUpperCase().replace(/\s+/g,'');let bits=0,value=0,out=[];for(const ch of clean){const n=alphabet.indexOf(ch);if(n<0)throw new Error('Invalid 2FA secret');value=(value<<5)|n;bits+=5;if(bits>=8){bits-=8;out.push((value>>bits)&255)}}return new Uint8Array(out)}
 async function verifyTotp(secret,token){const code=String(token||'').replace(/\s/g,'');if(!/^\d{6}$/.test(code))return false;const key=await crypto.subtle.importKey('raw',base32ToBytes(secret),{name:'HMAC',hash:'SHA-1'},false,['sign']);const step=Math.floor(Date.now()/1000/30);for(let offset=-1;offset<=1;offset++){const counter=step+offset;const data=new ArrayBuffer(8);const view=new DataView(data);view.setUint32(0,Math.floor(counter/4294967296));view.setUint32(4,counter>>>0);const mac=new Uint8Array(await crypto.subtle.sign('HMAC',key,data));const index=mac[mac.length-1]&15;const bin=((mac[index]&127)<<24)|(mac[index+1]<<16)|(mac[index+2]<<8)|mac[index+3];if(String(bin%1000000).padStart(6,'0')===code)return true}return false}
 async function handleApi(req,url){const method=req.method;const path=url.pathname;const staff=auth(req);
+
+if(path==='/api/destinations'&&method==='GET'){
+  try{
+    if(!staff)return json({error:'Unauthorized'},401);
+
+    const q=String(url.searchParams.get('q')||'').trim();
+
+    if(q.length<2){
+      return json({results:[]});
+    }
+
+    let matches=geo.getCitiesByName(q);
+
+    // Saudi Arabia city aliases.
+    // Keep Medina searchable even when the city database uses Madinah/Madina.
+    if(/^(medina|madinah|madina)$/i.test(q)){
+      matches=[
+        {
+          city:{name:'Medina'},
+          country:{name:'Saudi Arabia'},
+          state:'Al Madinah'
+        },
+        ...matches
+      ];
+    }
+
+    const seen=new Set();
+    const results=[];
+
+    for(const item of matches){
+      const city=String(item?.city?.name||'').trim();
+      const country=String(item?.country?.name||'').trim();
+      const state=String(item?.state||'').trim();
+
+      if(!city||!country)continue;
+
+      const key=`${city.toLowerCase()}|${country.toLowerCase()}`;
+      if(seen.has(key))continue;
+      seen.add(key);
+
+      results.push({
+        city,
+        country,
+        state,
+        display:`${city} - ${country}`,
+        rezlive:`${city},${country}`
+      });
+
+      if(results.length>=15)break;
+    }
+
+    return json({results});
+  }catch(e){
+    console.error('Destination lookup failed:',e);
+    return json({error:'Destination lookup failed'},500);
+  }
+}
+
  if(path==='/api/auth/login'&&method==='POST'){if(rateLimited(req))return json({error:'Too many login attempts. Please try again later.'},429);try{const{username,password}=await body(req);if(typeof username!=='string'||typeof password!=='string')return json({error:'Invalid login'},400);const r=await db.query('SELECT * FROM staff WHERE username=$1',[username]);const s=r.rows[0];if(!s||!await bcrypt.compare(password,s.password_hash))return json({error:'Invalid username or password'},401);const temp=jwt.sign({staffId:s.id,purpose:'2fa'},JWT_SECRET,{expiresIn:'5m'});return json({tempToken:temp,needs2fa:true})}catch(e){console.error(e);return json({error:'Login service error'},500)}}
- if(path==='/api/auth/verify-2fa'&&method==='POST'){if(rateLimited(req))return json({error:'Too many login attempts. Please try again later.'},429);try{const{tempToken,code}=await body(req);let temp;try{temp=jwt.verify(String(tempToken||''),JWT_SECRET)}catch{return json({error:'Login expired, start again'},401)}if(!temp||temp.purpose!=='2fa'||!temp.staffId)return json({error:'Login expired, start again'},401);const r=await db.query('SELECT id,username,role,totp_secret FROM staff WHERE id=$1',[temp.staffId]);const s=r.rows[0];if(!s||!(await verifyTotp(s.totp_secret,code)))return json({error:'Invalid authenticator code'},401);const session=jwt.sign({staffId:s.id,username:s.username,role:s.role},JWT_SECRET,{expiresIn:'8h'});return json({ok:true,username:s.username,role:s.role},200,{'set-cookie':cookieHeader('session',session,{maxAge:8*3600*1000,secure:true})})}catch(e){console.error(e);return json({error:'2FA service error'},500)}}
- if(path==='/api/auth/logout'&&method==='POST'){if(!staff)return json({error:'Not logged in'},401);return json({ok:true},200,{'set-cookie':cookieHeader('session','',{maxAge:0,secure:true})})}
+ if(path==='/api/auth/verify-2fa'&&method==='POST'){if(rateLimited(req))return json({error:'Too many login attempts. Please try again later.'},429);try{const{tempToken,code}=await body(req);let temp;try{temp=jwt.verify(String(tempToken||''),JWT_SECRET)}catch{return json({error:'Login expired, start again'},401)}if(!temp||temp.purpose!=='2fa'||!temp.staffId)return json({error:'Login expired, start again'},401);const r=await db.query('SELECT id,username,role,totp_secret FROM staff WHERE id=$1',[temp.staffId]);const s=r.rows[0];if(!s||!(await verifyTotp(s.totp_secret,code)))return json({error:'Invalid authenticator code'},401);const session=jwt.sign({staffId:s.id,username:s.username,role:s.role},JWT_SECRET,{expiresIn:'8h'});return json({ok:true,username:s.username,role:s.role},200,{'set-cookie':cookieHeader('session',session,{maxAge:8*3600*1000,secure:new URL(req.url).protocol==='https:'})})}catch(e){console.error(e);return json({error:'2FA service error'},500)}}
+ if(path==='/api/auth/logout'&&method==='POST'){if(!staff)return json({error:'Not logged in'},401);return json({ok:true},200,{'set-cookie':cookieHeader('session','',{maxAge:0,secure:new URL(req.url).protocol==='https:'})})}
  if(path==='/api/auth/me'&&method==='GET'){if(!staff)return json({error:'Not logged in'},401);return json({username:staff.username,role:staff.role})}
  if(!staff)return json({error:'Not logged in'},401);
- if(path==='/api/supplier-health'&&method==='GET'){try{const r=await db.query("SELECT id,name,login_url,site_username,site_password_enc,connector_type,enabled,browser_config,last_error,last_checked_at FROM sources WHERE enabled=true AND (connector_type='browser' OR connector_type='playwright') ORDER BY name");const statuses=await connectors.healthSources(r.rows);for(const s of statuses){const sourceId=Number(s.id);if(Number.isInteger(sourceId)){await db.query('UPDATE sources SET last_error=$1,last_checked_at=NOW() WHERE id=$2',[s.error||null,sourceId]);}}return json(statuses)}catch(e){console.error(e);return json({error:'Supplier health check failed'},500)}}
+ if(path==='/api/wanderbeds/manual-login'&&method==='POST'){
+  try{
+    const wb=require('./connectors/wanderbeds-browser-v1');
+    const r=await db.query("SELECT id,name,login_url,site_username,agent_code,site_password_enc,browser_config FROM sources WHERE name ILIKE '%wanderbeds%' ORDER BY id LIMIT 1");
+    if(!r.rows[0])return json({error:'WanderBeds source not found'},404);
+    const source=r.rows[0];
+    const cfg={...(source.browser_config||{}),manual_login:true};
+    const result=await wb.openWanderBedsManualLogin(source,cfg);
+    return json(result);
+  }catch(e){
+    console.error('WanderBeds manual login open error:',e);
+    return json({error:e.message||String(e)},500);
+  }
+}
+
+if(path==='/api/wanderbeds/manual-login/verify'&&method==='POST'){
+  try{
+    const wb=require('./connectors/wanderbeds-browser-v1');
+    const result=await wb.completeWanderBedsManualLogin(180000);
+    return json(result);
+  }catch(e){
+    console.error('WanderBeds manual login verify error:',e);
+    return json({error:e.message||String(e)},500);
+  }
+}
+
+if(path==='/api/wanderbeds/manual-login/status'&&method==='GET'){
+  try{
+    const wb=require('./connectors/wanderbeds-browser-v1');
+    return json(await wb.wanderBedsManualLoginStatus());
+  }catch(e){
+    return json({ok:true,loggedIn:false});
+  }
+}
+
+if(path==='/api/supplier-health'&&method==='GET'){try{const r=await db.query("SELECT id,name,login_url,site_username,site_password_enc,agent_code,connector_type,enabled,browser_config,last_error,last_checked_at FROM sources WHERE enabled=true AND (connector_type='browser' OR connector_type='playwright') ORDER BY name");const statuses=await connectors.healthSources(r.rows);for(const s of statuses){const sourceId=Number(s.id);if(Number.isInteger(sourceId)){await db.query('UPDATE sources SET last_error=$1,last_checked_at=NOW() WHERE id=$2',[s.error||null,sourceId]);}}return json(statuses)}catch(e){console.error(e);return json({error:'Supplier health check failed'},500)}}
  if(path==='/api/sources'&&method==='GET'){const r=await db.query("SELECT id,name,login_url,deep_link_template,site_username,agent_code,connector_type,enabled,last_error,last_checked_at,(site_password_enc IS NOT NULL AND site_password_enc<>'') AS has_password FROM sources WHERE enabled=true OR connector_type IN ('browser','playwright') ORDER BY name");return json(r.rows.map(x=>({...x,site_username: x.connector_type==='browser'||x.connector_type==='playwright'?x.site_username:undefined})))}
  if(path==='/api/connectors'&&method==='GET')return json(connectors.configuredConnectors());
  if(path==='/api/admin/sources'&&method==='GET'){if(!allowed(staff.role,'SUPER_ADMIN','ADMIN'))return json({error:'Insufficient permissions'},403);const r=await db.query('SELECT id,name,login_url,deep_link_template,site_username,connector_type,enabled,browser_config,site_password_enc,last_error,last_checked_at FROM sources ORDER BY name');return json(r.rows.map(x=>({...x,hasPassword:!!x.site_password_enc,site_password_enc:undefined})))}
- if(path.startsWith('/api/sources/')&&method==='PUT'){if(!allowed(staff.role,'SUPER_ADMIN','ADMIN'))return json({error:'Insufficient permissions'},403);const id=path.split('/').pop();try{const{name,login_url,site_username,site_password,agent_code,enabled,browser_config}=await body(req);const current=await db.query('SELECT * FROM sources WHERE id=$1',[id]);if(!current.rows[0])return json({error:'Supplier not found'},404);const s=current.rows[0];const passwordEnc=site_password?encrypt(String(site_password)):s.site_password_enc;await db.query('UPDATE sources SET name=$1,login_url=$2,site_username=$3,site_password_enc=$4,agent_code=$5,enabled=$6,browser_config=$7 WHERE id=$8',[String(name||s.name).slice(0,120),String(login_url||s.login_url),String(site_username??s.site_username||''),passwordEnc,String(agent_code??s.agent_code||''),enabled!==undefined?Boolean(enabled):s.enabled,JSON.stringify(browser_config||s.browser_config||{}) ,id]);return json({ok:true})}catch(e){console.error(e);return json({error:'Could not update supplier'},500)}}
+ if(path.startsWith('/api/sources/')&&method==='PUT'){if(!allowed(staff.role,'SUPER_ADMIN','ADMIN'))return json({error:'Insufficient permissions'},403);const id=path.split('/').pop();try{const{name,login_url,site_username,site_password,agent_code,enabled,browser_config}=await body(req);const current=await db.query('SELECT * FROM sources WHERE id=$1',[id]);if(!current.rows[0])return json({error:'Supplier not found'},404);const s=current.rows[0];const passwordEnc=site_password?encrypt(String(site_password)):s.site_password_enc;await db.query('UPDATE sources SET name=$1,login_url=$2,site_username=$3,site_password_enc=$4,agent_code=$5,enabled=$6,browser_config=$7 WHERE id=$8',[String(name||s.name).slice(0,120),String(login_url||s.login_url),String(site_username ?? s.site_username ?? ''),passwordEnc,String(agent_code ?? s.agent_code ?? ''),enabled!==undefined?Boolean(enabled):s.enabled,JSON.stringify(browser_config||s.browser_config||{}) ,id]);return json({ok:true})}catch(e){console.error(e);return json({error:'Could not update supplier'},500)}}
  if(path==='/api/sources'&&method==='POST'){if(!allowed(staff.role,'SUPER_ADMIN','ADMIN'))return json({error:'Insufficient permissions'},403);try{const{name,login_url,deep_link_template,site_username,site_password,agent_code,connector_type='api',enabled=true,browser_config={}}=await body(req);if(!name||!login_url)return json({error:'Name and login URL are required'},400);try{new URL(login_url)}catch{return json({error:'Invalid login URL'},400)}if(!['api','browser','playwright','manual'].includes(connector_type))return json({error:'Invalid connector type'},400);if(connector_type==='browser'||connector_type==='playwright'){if(!site_username||!site_password)return json({error:'Browser connector requires username and password'},400);if(typeof browser_config!=='object'||Array.isArray(browser_config))return json({error:'browser_config must be an object'},400)}const r=await db.query('INSERT INTO sources(name,login_url,deep_link_template,site_username,site_password_enc,agent_code,connector_type,enabled,browser_config) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',[name.slice(0,120),login_url,deep_link_template||'',site_username||'',encrypt(site_password||''),agent_code||'',connector_type,Boolean(enabled),JSON.stringify(browser_config||{})]);return json({id:r.rows[0].id})}catch(e){console.error(e);return json({error:'Could not save source. Please check the source details and try again.'},500)}}
  if(path.startsWith('/api/sources/')&&method==='DELETE'){if(!allowed(staff.role,'SUPER_ADMIN','ADMIN'))return json({error:'Insufficient permissions'},403);await db.query('DELETE FROM sources WHERE id=$1',[path.split('/').pop()]);return json({ok:true})}
- if(path==='/api/search'&&method==='POST'){try{const{destination,checkin,checkout,guests,rooms=1,board='ROOM_ONLY',hotelName='',hotel_name=''}=await body(req);if(!validSearch({destination,checkin,checkout,guests,rooms,board}))return json({error:'Check destination, dates, guests, rooms and board'},400);const hotelFilter=String(hotelName||hotel_name||'').trim().slice(0,120);const r=await db.query('INSERT INTO searches(staff_id,destination,checkin,checkout,guests,rooms,board) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',[staff.staffId,destination.trim(),checkin,checkout,Number(guests),Number(rooms),board]);const s=await db.query('SELECT id,name,login_url,deep_link_template,site_username,site_password_enc,agent_code,connector_type,enabled,browser_config FROM sources ORDER BY name');const connectorResult=await connectors.searchAll({destination:destination.trim(),checkin,checkout,guests:Number(guests),rooms:Number(rooms),board,hotel_name:hotelFilter},s.rows);return json({searchId:r.rows[0].id,results:connectorResult.results,connectorStatuses:connectorResult.statuses,links:s.rows.map(x=>({sourceId:x.id,name:x.name,url:fill(x.deep_link_template,{destination,checkin,checkout,guests,rooms,board})||x.login_url}))})}catch(e){console.error(e);return json({error:'Search could not be completed'},500)}}
+ if(path==='/api/wanderbeds/rates'&&method==='POST'){
+  try{
+    const{url,hotel}=await body(req);
+
+    if(
+      !url ||
+      !/^https?:\/\/(?:www\.)?wanderbeds\.com\/book\/\d+\/hoteldetails\//i.test(
+        String(url)
+      )
+    ){
+      return json({error:'Invalid WanderBeds hotel details URL'},400);
+    }
+
+    const sourceResult=await db.query(
+      "SELECT id,name FROM sources WHERE enabled=true AND LOWER(name) LIKE '%wanderbeds%' ORDER BY id LIMIT 1"
+    );
+
+    if(!sourceResult.rows[0]){
+      return json({error:'WanderBeds supplier is not enabled'},404);
+    }
+
+    const wb=require('./connectors/wanderbeds-browser-v1');
+
+    const result=await wb.getWanderBedsRates(
+      String(url),
+      {hotel:String(hotel||'').trim()}
+    );
+
+    return json(result);
+  }catch(e){
+    console.error('WANDERBEDS RATES ERROR:',e);
+    return json({
+      ok:false,
+      error:String(e&&e.message||e||'WanderBeds rates failed')
+    },500);
+  }
+}
+
+if(path==='/api/search'&&method==='POST'){try{const{destination,destinationCountry='',checkin,checkout,guests,rooms=1,board='ROOM_ONLY',hotelName='',hotel_name='',supplierIds=[]}=await body(req);if(!validSearch({destination,checkin,checkout,guests,rooms,board}))return json({error:'Check destination, dates, guests, rooms and board'},400);const hotelFilter=String(hotelName||hotel_name||'').trim().slice(0,120);const r=await db.query('INSERT INTO searches(staff_id,destination,checkin,checkout,guests,rooms,board) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',[staff.staffId,destination.trim(),checkin,checkout,Number(guests),Number(rooms),board]);const s=await db.query('SELECT id,name,login_url,deep_link_template,site_username,site_password_enc,agent_code,connector_type,enabled,browser_config FROM sources ORDER BY name');
+const selectedSupplierIds=Array.isArray(supplierIds)
+  ? supplierIds.map(x=>Number(x)).filter(Number.isInteger)
+  : [];
+
+const selectedSources=selectedSupplierIds.length
+  ? s.rows.filter(source=>selectedSupplierIds.includes(Number(source.id)))
+  : s.rows;
+
+console.log('SEARCH SUPPLIER FILTER:',{
+  requested:supplierIds,
+  selected:selectedSupplierIds,
+  running:selectedSources.map(source=>({id:source.id,name:source.name}))
+});
+
+const connectorResult=await connectors.searchAll({destination:destination.trim(),destinationCountry:String(destinationCountry||'').trim(),checkin,checkout,guests:Number(guests),rooms:Number(rooms),board,hotel_name:hotelFilter},selectedSources);return json({searchId:r.rows[0].id,results:connectorResult.results,connectorStatuses:connectorResult.statuses,links:selectedSources.map(x=>({sourceId:x.id,name:x.name,url:fill(x.deep_link_template,{destination,checkin,checkout,guests,rooms,board})||x.login_url}))})}catch(e){console.error(e);return json({error:'Search could not be completed'},500)}}
  if(path==='/api/history'&&method==='GET'){const isAdmin=['SUPER_ADMIN','ADMIN','MANAGER'].includes(staff.role);const q=isAdmin?'SELECT searches.*,staff.username FROM searches JOIN staff ON staff.id=searches.staff_id ORDER BY created_at DESC LIMIT 100':'SELECT searches.*,staff.username FROM searches JOIN staff ON staff.id=searches.staff_id WHERE staff_id=$1 ORDER BY created_at DESC LIMIT 100';const r=await db.query(q,isAdmin?[]:[staff.staffId]);return json(r.rows)}
  if(path.startsWith('/api/comparisons/')&&method==='GET')return json([]);if(path.startsWith('/api/comparisons/')&&method==='DELETE')return json({ok:true});return json({error:'Not found'},404)}
-const initPromise=db.init();initPromise.catch(e=>console.error(e));async function handleRequest(req){const url=new URL(req.url);if(url.pathname==='/health'){try{await db.query('SELECT 1');return json({ok:true})}catch(e){console.error(e);return json({ok:false},503)}}if(url.pathname.startsWith('/api/')){try{return await handleApi(req,url)}catch(e){console.error(e);return json({error:'Request failed'},500)}}return new Response('Not found',{status:404,headers:htmlHeaders()})}
+const initPromise=db.init();initPromise.catch(e=>console.error(e));async function handleRequest(req){
+const url=new URL(req.url);
+const origin=req.headers.get('origin');
+const corsHeaders={
+  ...(origin==='http://127.0.0.1:3000'||origin==='http://localhost:3000'
+    ? {
+        'access-control-allow-origin':origin,
+        'access-control-allow-credentials':'true',
+        'access-control-allow-methods':'GET,POST,PUT,DELETE,OPTIONS',
+        'access-control-allow-headers':'Content-Type,Accept'
+      }
+    : {})
+};
+if(req.method==='OPTIONS'&&url.pathname.startsWith('/api/')){
+  return new Response(null,{status:204,headers:corsHeaders});
+}
+if(url.pathname==='/health'){try{await db.query('SELECT 1');return json({ok:true},200,corsHeaders)}catch(e){console.error(e);return json({ok:false},503,corsHeaders)}}if(url.pathname.startsWith('/api/')){try{const response=await handleApi(req,url);return new Response(response.body,{status:response.status,headers:{...Object.fromEntries(response.headers),...corsHeaders}})}catch(e){console.error(e);return json({error:'Request failed'},500,corsHeaders)}}return new Response('Not found',{status:404,headers:htmlHeaders()})}
 module.exports={handleRequest,initPromise};
+
+
+
+
+
+
+
+
+
+

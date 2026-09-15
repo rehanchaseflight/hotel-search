@@ -8,10 +8,13 @@
     "seed-staff": "node create-staff.js",
     "install-browsers": "playwright install chromium"
   },
-  "engines": {"node": ">=20"},
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.1",
     "bcryptjs": "^2.4.3",
+    "countrycitystatejson": "^26.8.1603",
     "dotenv": "^16.4.5",
     "jsonwebtoken": "^9.0.2",
     "playwright": "^1.55.0",

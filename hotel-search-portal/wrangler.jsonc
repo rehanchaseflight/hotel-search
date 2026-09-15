@@ -1,10 +1,10 @@
-{
+﻿{
   "$schema": "../node_modules/wrangler/config-schema.json",
   "name": "hotel-search",
   "main": "./worker.mjs",
   "compatibility_date": "2026-09-04",
   "vars": {
-    "BACKEND_URL": "https://YOUR-RENDER-SERVICE.onrender.com"
+    "BACKEND_URL": "http://127.0.0.1:3001"
   },
   "assets": {
     "directory": "./public",
@@ -12,3 +12,5 @@
     "run_worker_first": ["/api/*", "/health"]
   }
 }
+
+
