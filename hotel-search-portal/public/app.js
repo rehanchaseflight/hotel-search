@@ -1,4 +1,4 @@
-﻿﻿let tempToken=null,currentSearchId=null,currentSources=[];
+﻿let tempToken=null,currentSearchId=null,currentSources=[];
 const $=id=>document.getElementById(id),show=id=>$(id).classList.remove("hidden"),hide=id=>$(id).classList.add("hidden");
 
 (function setupDestinationAutocomplete(){
@@ -260,7 +260,7 @@ async function manualWanderBedsLogin(){
   }
 }
 
-async function loadSources(){try{currentSources=await api('/api/sources');renderSearchSupplierControls();const nameInput=$('source-name');const wanted=(nameInput?.value||'WanderBeds').trim();const editing=$('source-form')?.dataset.editing==='true';const source=currentSources.find(s=>new RegExp(wanted,'i').test(s.name||''))||currentSources.find(s=>/wanderbeds/i.test(s.name||''));if(source&&!editing){nameInput.value=source.name;$('source-login-url').value=source.login_url||'https://wanderbeds.com/?setlang=en';$('source-agent-code').value=source.agent_code||'';$('source-username').value=source.site_username||'';$('source-password').value='';$('source-form').dataset.sourceId=source.id}else if(!source&&!editing){$('source-form').dataset.sourceId=''}const tbody=document.querySelector('#sources-table tbody');if(!tbody)return;tbody.innerHTML='';currentSources.filter(s=>/hadaf|wanderbeds|locanda|rezlive/i.test(s.name||'')).forEach(s=>{const tr=document.createElement('tr');const credentialStatus=s.has_password?'Encrypted credentials':'Not configured';tr.innerHTML=`<td>${s.name}</td><td>${s.login_url||'â€”'}</td><td>Browser / B2B login</td><td>${credentialStatus}</td><td><button type="button" class="source-edit-btn" data-edit-source="${s.id}">Edit</button>${/wanderbeds/i.test(s.name||"")?'<button type="button" class="source-edit-btn" data-wanderbeds-login="1" style="margin-left:6px">Login Manually</button>':''}</td>`;tbody.appendChild(tr)})}catch(err){console.error(err)}}
+async function loadSources(){try{currentSources=await api('/api/sources');renderSearchSupplierControls();const nameInput=$('source-name');const wanted=(nameInput?.value||'WanderBeds').trim();const editing=$('source-form')?.dataset.editing==='true';const source=currentSources.find(s=>new RegExp(wanted,'i').test(s.name||''))||currentSources.find(s=>/wanderbeds/i.test(s.name||''));if(source&&!editing){nameInput.value=source.name;$('source-login-url').value=source.login_url||'https://wanderbeds.com/?setlang=en';$('source-agent-code').value=source.agent_code||'';$('source-username').value=source.site_username||'';$('source-password').value='';$('source-form').dataset.sourceId=source.id}else if(!source&&!editing){$('source-form').dataset.sourceId=''}const tbody=document.querySelector('#sources-table tbody');if(!tbody)return;tbody.innerHTML='';currentSources.filter(s=>/hadaf|wanderbeds|locanda|rezlive/i.test(s.name||'')).forEach(s=>{const tr=document.createElement('tr');const credentialStatus=s.has_password?'Encrypted credentials':'Not configured';tr.innerHTML=`<td>${s.name}</td><td>${s.login_url||'—'}</td><td>Browser / B2B login</td><td>${credentialStatus}</td><td><button type="button" class="source-edit-btn" data-edit-source="${s.id}">Edit</button>${/wanderbeds/i.test(s.name||"")?'<button type="button" class="source-edit-btn" data-wanderbeds-login="1" style="margin-left:6px">Login Manually</button>':''}</td>`;tbody.appendChild(tr)})}catch(err){console.error(err)}}
 async function saveSource(e){e.preventDefault();const msg=$('source-message');msg.textContent='';msg.className='admin-message';try{const supplier=$('source-name').value.trim()||'WanderBeds';const existing=currentSources.find(s=>String(s.id)==String($('source-form').dataset.sourceId))||currentSources.find(s=>new RegExp('^'+supplier.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$','i').test(s.name||''));const isLocanda=/locanda/i.test(supplier);const isRezLive=/rezlive/i.test(supplier);const browserConfig=isLocanda?{preset:'locanda',requires_manual_captcha:true}:isRezLive?{preset:'rezlive'}:{preset:'wanderbeds'};const payload={name:supplier,login_url:$('source-login-url').value.trim(),site_username:$('source-username').value.trim(),site_password:$('source-password').value,agent_code:$('source-agent-code').value.trim(),enabled:true,browser_config:browserConfig};if(existing){await api(`/api/sources/${existing.id}`,{method:'PUT',body:JSON.stringify(payload)});$('source-form').dataset.sourceId=existing.id;msg.textContent=`${supplier} credentials updated and encrypted.`}else{const d=await api('/api/sources',{method:'POST',body:JSON.stringify({...payload,connector_type:'browser'})});$('source-form').dataset.sourceId=d.id;msg.textContent=`${supplier} supplier saved. Credentials are encrypted.`}$('source-password').value='';$('source-form').dataset.editing='';$('source-cancel').classList.add('hidden');await loadSources();await loadSupplierHealth()}catch(err){msg.textContent=err.message;msg.className='admin-message error'}}
 $('source-form')?.addEventListener('submit',saveSource);
 $('source-cancel')?.addEventListener('click',cancelSourceEdit);
@@ -278,9 +278,9 @@ $('sources-table')?.addEventListener('click',e=>{
   }
 });
 
-async function loadSupplierHealth(){const box=$('dashboard-supplier-status');if(!box)return;try{box.innerHTML='<div class="searching-status">Checking supplier connectionsâ€¦</div>';renderSupplierStatus(await api('/api/supplier-health'),'dashboard-supplier-status')}catch(err){box.innerHTML=`<p class="error">Supplier health check failed: ${err.message}</p>`}}
+async function loadSupplierHealth(){const box=$('dashboard-supplier-status');if(!box)return;try{box.innerHTML='<div class="searching-status">Checking supplier connections…</div>';renderSupplierStatus(await api('/api/supplier-health'),'dashboard-supplier-status')}catch(err){box.innerHTML=`<p class="error">Supplier health check failed: ${err.message}</p>`}}
 function renderSupplierStatus(statuses,targetId='supplier-status'){const box=$(targetId);if(!box)return;box.innerHTML='';const list=Array.isArray(statuses)?statuses:[];const summary=document.createElement('div');summary.className='supplier-summary';summary.innerHTML=`<strong>${list.filter(x=>x.status==='live'||x.ok).length} live</strong>`;box.appendChild(summary);list.forEach(s=>{const card=document.createElement('div');card.className='supplier-status-card';const live=s.status==='live'||s.ok;card.innerHTML=`<span>${s.name}</span><span class="supplier-badge ${live?'live':'error'}">${live?'Live':'Offline'}</span>${s.error?`<small>${s.error}</small>`:''}`;box.appendChild(card)})}
-function addCell(tr,value,cls=''){const td=document.createElement('td');td.textContent=value===null||value===undefined||value===''?'â€”':value;if(cls)td.className=cls;tr.appendChild(td)}
+function addCell(tr,value,cls=''){const td=document.createElement('td');td.textContent=value===null||value===undefined||value===''?'—':value;if(cls)td.className=cls;tr.appendChild(td)}
 function getSelectedSupplierIds(){
   const selected=[];
   document
@@ -500,6 +500,68 @@ function isDisplayableHotelRate(r){
 
   return true;
 }
+function cleanLocandaField(value){
+  const x = String(value ?? '').trim();
+
+  // Locanda hotel-list rows do not contain room/rate details yet.
+  // Treat encoding artifacts and control characters as empty fields.
+  if (
+    !x ||
+    /[\\u00c3\\u00e2]/.test(x) ||
+    /[\\u0080-\\u009f]/.test(x) ||
+    /\\uFFFD/.test(x)
+  ) {
+    return '';
+  }
+
+  return x;
+}
+
+async function loadAedUsdRate(){
+  try{
+    const response = await fetch(
+      'https://open.er-api.com/v6/latest/AED',
+      {cache:'no-store'}
+    );
+
+    if(!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const data = await response.json();
+    const rate = Number(data?.rates?.USD);
+
+    if(Number.isFinite(rate) && rate > 0){
+      window.__aedUsdRate = rate;
+      console.log('AED/USD RATE:', rate);
+      return rate;
+    }
+  }catch(error){
+    console.warn('AED/USD RATE LOAD FAILED:', error?.message || error);
+  }
+
+  return null;
+}
+
+const aedUsdRatePromise = loadAedUsdRate();
+
+async function waitForAedUsdRate(){
+  if(Number.isFinite(window.__aedUsdRate)){
+    return window.__aedUsdRate;
+  }
+
+  try{
+    const rate = await Promise.race([
+      aedUsdRatePromise,
+      new Promise(resolve => setTimeout(() => resolve(null), 5000))
+    ]);
+
+    return Number.isFinite(window.__aedUsdRate)
+      ? window.__aedUsdRate
+      : rate;
+  }catch(error){
+    console.warn('AED/USD RATE WAIT FAILED:', error?.message || error);
+    return null;
+  }
+}
 function renderResults(results,statuses){
   renderSupplierStatus(statuses);
 
@@ -513,22 +575,24 @@ function renderResults(results,statuses){
     .map(r=>({
       ...r,
       hotel:String(r.hotel||'').trim(),
-      room:String(r.room||'').trim(),
-      category:String(
+      room:/locanda/i.test(String(r.supplier||r.source||r.source_name||'')) ? '' : String(r.room||'').trim(),
+      category:/locanda/i.test(String(r.supplier||r.source||r.source_name||'')) ? '' : cleanLocandaField(
         r.category ??
         r.hotel_category ??
         r.hotelCategory ??
         r.star_rating ??
         r.stars ??
         ''
-      ).trim(),
-      view:String(r.view||'').trim(),
-      board:String(r.board||'').trim(),
-      cancellation:String(r.cancellation||'').trim(),
+      ),
+      view:/locanda/i.test(String(r.supplier||r.source||r.source_name||'')) && String(r.availability||'').trim()
+        ? String(r.availability).trim()
+        : String(r.view||'').trim(),
+      board:/locanda/i.test(String(r.supplier||r.source||r.source_name||'')) ? '' : String(r.board||'').trim(),
+      cancellation:/locanda/i.test(String(r.supplier||r.source||r.source_name||'')) ? '' : String(r.cancellation||'').trim(),
       availability:String(r.availability||'Available').trim(),
       supplier:String(r.supplier||r.source||r.source_name||'Supplier').trim(),
-      currency:String(r.currency||'AED').trim(),
-      price:r.price==null||r.price===''?null:Number(r.price)
+      currency:/locanda/i.test(String(r.supplier||r.source||r.source_name||'')) ? 'USD' : String(r.currency||'AED').trim(),
+      price:/locanda/i.test(String(r.supplier||r.source||r.source_name||'')) && (r.price==null || r.price==='' || Number(r.price)===0) ? null : (r.price==null||r.price===''?null:Number(r.price))
     }));
 
   const count=document.createElement('div');
@@ -663,9 +727,367 @@ function renderResults(results,statuses){
         }
 
         addCell(tr,r.hotel,index===0?'hotel-group-name':'');
-        addCell(tr,r.room);
-        addCell(tr,r.category);
+        if(/rezlive/i.test(String(r.supplier || r.source || ""))){
+          addCell(tr,'—');
+          addCell(tr,'—');
+        }else{
+          addCell(tr,/locanda/i.test(String(r.supplier || r.source || "")) ? "" : r.room);
+          addCell(tr,/locanda/i.test(String(r.supplier || r.source || "")) ? "" : r.category);
+        }
+        /*
+         * REZLIVE_DETAILS_UI_V1
+         *
+         * RezLive returns hotel room/rate details through its
+         * hotelviewmore endpoint. The search itself remains unchanged.
+         */
+        const rezDetails =
+          r.raw &&
+          r.raw.rezliveDetailsMeta
+            ? r.raw.rezliveDetailsMeta
+            : null;
+
         if(
+          /rezlive/i.test(String(r.supplier || r.source || "")) &&
+          rezDetails &&
+          rezDetails.hotelId &&
+          rezDetails.roomId &&
+          rezDetails.filepostfix
+        ){
+          const td=document.createElement('td');
+          const a=document.createElement('a');
+
+          a.href='#';
+          a.textContent='View Rates';
+          a.className='hotel-view-link';
+
+          a.addEventListener('click',async(ev)=>{
+            ev.preventDefault();
+
+            a.textContent='Loading...';
+            a.style.pointerEvents='none';
+
+            try{
+              const response=await fetch('/api/rezlive/details',{
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                credentials:'same-origin',
+                body:JSON.stringify({
+                  hotelId:rezDetails.hotelId,
+                  roomId:rezDetails.roomId,
+                  filepostfix:rezDetails.filepostfix
+                })
+              });
+
+              const payload=await response.json();
+
+              if(!response.ok||!payload.ok){
+                throw new Error(
+                  payload.error||'Unable to load RezLive hotel details'
+                );
+              }
+
+              const overlay=document.createElement('div');
+
+              overlay.style.cssText=[
+                'position:fixed',
+                'inset:0',
+                'background:rgba(0,0,0,.55)',
+                'z-index:99999',
+                'display:flex',
+                'align-items:center',
+                'justify-content:center',
+                'padding:24px'
+              ].join(';');
+
+              const modal=document.createElement('div');
+
+              modal.style.cssText=[
+                'background:#fff',
+                'border-radius:10px',
+                'width:min(1050px,96vw)',
+                'max-height:90vh',
+                'overflow:auto',
+                'padding:24px',
+                'box-shadow:0 20px 60px rgba(0,0,0,.3)'
+              ].join(';');
+
+              const header=document.createElement('div');
+
+              header.style.cssText=[
+                'display:flex',
+                'justify-content:space-between',
+                'align-items:center',
+                'gap:16px',
+                'margin-bottom:18px'
+              ].join(';');
+
+              const title=document.createElement('h3');
+              title.textContent=
+                String(r.hotel||'RezLive Hotel Details');
+              title.style.margin='0';
+
+              const close=document.createElement('button');
+              close.type='button';
+              close.textContent='Close';
+              close.style.cssText=[
+                'border:0',
+                'background:#eee',
+                'padding:8px 14px',
+                'border-radius:6px',
+                'cursor:pointer'
+              ].join(';');
+
+              close.addEventListener('click',()=>{
+                overlay.remove();
+              });
+
+              header.appendChild(title);
+              header.appendChild(close);
+              modal.appendChild(header);
+
+              const rates=Array.isArray(payload.rates)
+                ? payload.rates
+                : [];
+
+              if(!rates.length){
+                const empty=document.createElement('div');
+                empty.textContent='No room rates were returned by RezLive.';
+                empty.style.padding='20px 0';
+                modal.appendChild(empty);
+              }else{
+                const table=document.createElement('table');
+
+                table.style.cssText=[
+                  'width:100%',
+                  'border-collapse:collapse',
+                  'font-size:14px'
+                ].join(';');
+
+                const thead=document.createElement('thead');
+                const headRow=document.createElement('tr');
+
+                [
+                  'Room',
+                  'Inclusion',
+                  'Board',
+                  'Per Room Rate',
+                  'Total',
+                  'Cancellation'
+                ].forEach(label=>{
+                  const th=document.createElement('th');
+                  th.textContent=label;
+                  th.style.cssText=[
+                    'text-align:left',
+                    'padding:10px',
+                    'border-bottom:2px solid #ddd',
+                    'white-space:nowrap'
+                  ].join(';');
+                  headRow.appendChild(th);
+                });
+
+                thead.appendChild(headRow);
+                table.appendChild(thead);
+
+                const tbody=document.createElement('tbody');
+
+                rates.forEach(rate=>{
+                  const row=document.createElement('tr');
+
+                  [
+                    rate.room||'—',
+                    rate.inclusion||'—',
+                    rate.board||'—',
+                    rate.perRoomRate||'—',
+                    rate.total||'—'
+                  ].forEach(value=>{
+                    const cell=document.createElement('td');
+                    cell.textContent=String(value);
+                    cell.style.cssText=[
+                      'padding:10px',
+                      'border-bottom:1px solid #eee',
+                      'vertical-align:top'
+                    ].join(';');
+                    row.appendChild(cell);
+                  });
+
+                  const cancelCell=document.createElement('td');
+                  cancelCell.style.cssText=[
+                    'padding:10px',
+                    'border-bottom:1px solid #eee',
+                    'vertical-align:top'
+                  ].join(';');
+
+                  if(rate.cancellationArgs){
+                    const cancelLink=document.createElement('a');
+                    cancelLink.href='#';
+                    cancelLink.textContent='Cancellation Policy';
+                    cancelLink.style.cursor='pointer';
+
+                    cancelLink.addEventListener('click',async(cancelEvent)=>{
+                      cancelEvent.preventDefault();
+
+                      cancelLink.textContent='Loading...';
+
+                      try{
+                        const args=String(
+                          rate.cancellationArgs||''
+                        );
+
+                        const parts=args
+                          .split(',')
+                          .map(x=>x.trim())
+                          .map(x=>x.replace(/^['"]|['"]$/g,''));
+
+                        const policyId=parts[0]||'';
+                        const roomIndex=parts[1]||'0';
+
+                        const policyResponse=await fetch(
+                          '/api/rezlive/cancellation-policy',
+                          {
+                            method:'POST',
+                            headers:{
+                              'Content-Type':'application/json'
+                            },
+                            credentials:'same-origin',
+                            body:JSON.stringify({
+                              policyId,
+                              roomId:roomIndex,
+                              searchId:rezDetails.filepostfix
+                            })
+                          }
+                        );
+
+                        const policyPayload=
+                          await policyResponse.json();
+
+                        if(
+                          !policyResponse.ok ||
+                          !policyPayload.ok
+                        ){
+                          throw new Error(
+                            policyPayload.error||
+                            'Cancellation policy unavailable'
+                          );
+                        }
+
+                        const policyOverlay=
+                          document.createElement('div');
+
+                        policyOverlay.style.cssText=[
+                          'position:fixed',
+                          'inset:0',
+                          'background:rgba(0,0,0,.55)',
+                          'z-index:100000',
+                          'display:flex',
+                          'align-items:center',
+                          'justify-content:center',
+                          'padding:24px'
+                        ].join(';');
+
+                        const policyModal=
+                          document.createElement('div');
+
+                        policyModal.style.cssText=[
+                          'background:#fff',
+                          'border-radius:10px',
+                          'width:min(750px,94vw)',
+                          'max-height:80vh',
+                          'overflow:auto',
+                          'padding:24px',
+                          'box-shadow:0 20px 60px rgba(0,0,0,.3)'
+                        ].join(';');
+
+                        const policyTitle=
+                          document.createElement('h3');
+
+                        policyTitle.textContent=
+                          'Cancellation Policy';
+
+                        const policyBody=
+                          document.createElement('div');
+
+                        policyBody.innerHTML=
+                          policyPayload.html||
+                          '<p>No cancellation policy details were returned.</p>';
+
+                        const policyClose=
+                          document.createElement('button');
+
+                        policyClose.type='button';
+                        policyClose.textContent='Close';
+                        policyClose.style.cssText=[
+                          'margin-top:18px',
+                          'border:0',
+                          'background:#eee',
+                          'padding:8px 14px',
+                          'border-radius:6px',
+                          'cursor:pointer'
+                        ].join(';');
+
+                        policyClose.addEventListener(
+                          'click',
+                          ()=>{
+                            policyOverlay.remove();
+                          }
+                        );
+
+                        policyModal.appendChild(policyTitle);
+                        policyModal.appendChild(policyBody);
+                        policyModal.appendChild(policyClose);
+                        policyOverlay.appendChild(policyModal);
+                        document.body.appendChild(policyOverlay);
+
+                      }catch(policyError){
+                        alert(
+                          'Cancellation policy could not be loaded: '+
+                          String(
+                            policyError&&policyError.message||
+                            policyError
+                          )
+                        );
+                      }finally{
+                        cancelLink.textContent='Cancellation Policy';
+                      }
+                    });
+
+                    cancelCell.appendChild(cancelLink);
+                  }else{
+                    cancelCell.textContent='—';
+                  }
+
+                  row.appendChild(cancelCell);
+                  tbody.appendChild(row);
+                });
+
+                table.appendChild(tbody);
+                modal.appendChild(table);
+              }
+
+              overlay.appendChild(modal);
+
+              overlay.addEventListener('click',ev=>{
+                if(ev.target===overlay){
+                  overlay.remove();
+                }
+              });
+
+              document.body.appendChild(overlay);
+
+            }catch(error){
+              alert(
+                'RezLive hotel details could not be loaded: '+
+                String(error&&error.message||error)
+              );
+            }finally{
+              a.textContent='View Rates';
+              a.style.pointerEvents='';
+            }
+          });
+
+          td.appendChild(a);
+          tr.appendChild(td);
+
+        }else if(
   /wanderbeds/i.test(String(r.supplier || r.source || "")) &&
   /^https?:\/\/[^/]*wanderbeds\.com\/book\/1\/hoteldetails\//i.test(String(r.view || r.url || ""))
 ){
@@ -796,7 +1218,7 @@ function renderResults(results,statuses){
               )+
               ' total'+
               (rate.nights
-                ?' · '+rate.nights+' nights'
+                ?' Â· '+rate.nights+' nights'
                 :'');
           }
 
@@ -846,6 +1268,151 @@ function renderResults(results,statuses){
   const viewValue=String(r.view||r.url||'').trim();
 
 if(
+  /locanda/i.test(String(r.supplier||r.source||'')) &&
+  /^https?:\/\/app\.locandahub\.com\/agent\/booking\/availability\.php\?/i.test(viewValue)
+){
+  const td=document.createElement('td');
+  const a=document.createElement('a');
+
+  a.href='#';
+  a.textContent='View Rates';
+  a.className='hotel-view-link';
+
+  a.addEventListener('click',async(ev)=>{
+    ev.preventDefault();
+
+    const hotelName=String(r.hotel||'').trim();
+    const detailUrl=String(r.view||r.url||'').trim();
+
+    a.textContent='Loading...';
+    a.style.pointerEvents='none';
+
+    try{
+      const response=await fetch('/api/locanda/rates',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        credentials:'same-origin',
+        body:JSON.stringify({
+          url:detailUrl,
+          hotel:hotelName
+        })
+      });
+
+      const payload=await response.json();
+
+      if(!response.ok||!payload.ok){
+        throw new Error(
+          payload.error||'Unable to load Locanda rates'
+        );
+      }
+
+      const overlay=document.createElement('div');
+
+      overlay.style.cssText=[
+        'position:fixed',
+        'inset:0',
+        'background:rgba(0,0,0,.55)',
+        'z-index:99999',
+        'display:flex',
+        'align-items:center',
+        'justify-content:center',
+        'padding:24px'
+      ].join(';');
+
+      const modal=document.createElement('div');
+
+      modal.style.cssText=[
+        'background:#fff',
+        'border-radius:10px',
+        'width:min(900px,95vw)',
+        'max-height:90vh',
+        'overflow:auto',
+        'padding:24px',
+        'box-shadow:0 20px 60px rgba(0,0,0,.3)'
+      ].join(';');
+
+      const close=document.createElement('button');
+      close.type='button';
+      close.textContent='Close';
+      close.style.cssText='float:right;padding:7px 14px;cursor:pointer';
+
+      close.addEventListener('click',()=>{
+        overlay.remove();
+      });
+
+      const title=document.createElement('h2');
+      title.textContent=hotelName||'Locanda Rates';
+
+      modal.appendChild(close);
+      modal.appendChild(title);
+
+      if(!Array.isArray(payload.rates)||!payload.rates.length){
+        const empty=document.createElement('p');
+        empty.textContent='No Locanda rates were found.';
+        modal.appendChild(empty);
+      }else{
+        payload.rates.forEach(rate=>{
+          const card=document.createElement('div');
+
+          card.style.cssText=[
+            'border:1px solid #ddd',
+            'border-radius:8px',
+            'padding:14px',
+            'margin:10px 0'
+          ].join(';');
+
+          const room=document.createElement('div');
+          room.textContent='Room: '+String(rate.room||'');
+
+          const meal=document.createElement('div');
+          meal.textContent='Meal: '+String(rate.meal||'');
+
+          const cancellation=document.createElement('div');
+          cancellation.textContent='Cancellation: '+String(rate.cancellation||'');
+
+          const price=document.createElement('div');
+          price.textContent=
+            'Price: '+
+            String(rate.amount||'')+
+            ' '+
+            String(rate.currency||'');
+
+          price.style.fontWeight='700';
+
+          card.appendChild(room);
+          card.appendChild(meal);
+          card.appendChild(cancellation);
+          card.appendChild(price);
+
+          modal.appendChild(card);
+        });
+      }
+
+      overlay.appendChild(modal);
+
+      overlay.addEventListener('click',(ev)=>{
+        if(ev.target===overlay){
+          overlay.remove();
+        }
+      });
+
+      document.body.appendChild(overlay);
+
+    }catch(error){
+      alert(
+        'Locanda rates could not be loaded: '+
+        String(error&&error.message||error)
+      );
+    }finally{
+      a.textContent='View Rates';
+      a.style.pointerEvents='';
+    }
+  });
+
+  td.appendChild(a);
+  tr.appendChild(td);
+
+}else if(
   /wanderbeds/i.test(String(r.supplier||r.source||'')) &&
   /^https?:\/\/(?:www\.)?wanderbeds\.com\/book\/\d+\/hoteldetails\//i.test(viewValue)
 ){
@@ -976,7 +1543,7 @@ if(
               )+
               ' total'+
               (rate.nights
-                ?' · '+rate.nights+' nights'
+                ?' Â· '+rate.nights+' nights'
                 :'');
           }
 
@@ -1026,13 +1593,27 @@ if(
   addCell(tr,r.view);
 }
 }
-        addCell(tr,r.board);
-        addCell(tr,r.cancellation);
-
-        const priceText=
+        addCell(tr,/locanda/i.test(String(r.supplier || r.source || "")) ? "" : r.board);
+        addCell(tr,/locanda/i.test(String(r.supplier || r.source || "")) ? "" : r.cancellation);
+        const numericPrice =
           r.price==null || !Number.isFinite(Number(r.price))
-            ? '—'
-            : `${r.currency||'AED'} ${Number(r.price).toFixed(2)}`;
+            ? null
+            : Number(r.price);
+
+        const currencyCode = String(r.currency||'AED').trim().toUpperCase();
+
+        let priceText = '—';
+
+        if(numericPrice != null){
+          const baseText = `${currencyCode} ${numericPrice.toFixed(2)}`;
+
+          if(currencyCode === 'AED' && Number.isFinite(window.__aedUsdRate)){
+            const usdPrice = numericPrice * window.__aedUsdRate;
+            priceText = `${baseText} / USD ${usdPrice.toFixed(2)}`;
+          }else{
+            priceText = baseText;
+          }
+        }
 
         addCell(
           tr,
@@ -1040,7 +1621,31 @@ if(
           index===0?'price-cell best-price':'price-cell'
         );
 
-        addCell(tr,r.availability);
+        if(/locanda/i.test(String(r.supplier || r.source || "")) && String(r.availability || "").includes("locandahub.com/agent/booking/availability.php")){
+          const td=document.createElement('td');
+          const a=document.createElement('a');
+
+          a.href='#';
+          a.textContent='Show Rooms';
+          a.className='hotel-view-link';
+
+          a.addEventListener('click',(ev)=>{
+            ev.preventDefault();
+
+            const existingViewLink=tr.querySelector('.hotel-view-link');
+
+            if(existingViewLink && existingViewLink!==a){
+              existingViewLink.click();
+            }else{
+              alert('Locanda rates link is not ready.');
+            }
+          });
+
+          td.appendChild(a);
+          tr.appendChild(td);
+        }else{
+          addCell(tr,r.availability);
+        }
 
         const supplierText=
           index===0
@@ -1180,7 +1785,13 @@ function syncCheckout(){
 $('s-checkin').addEventListener('change',syncCheckout);
 $('s-nights').addEventListener('input',syncCheckout);
 $('s-checkout').addEventListener('change',syncNights);
-$('search-form').addEventListener('submit',async e=>{e.preventDefault();syncNights();const supplierIds=getSelectedSupplierIds();if(!supplierIds.length){$('supplier-status').innerHTML='<p class="error">Select at least one supplier.</p>';return;}const button=e.target.querySelector('button[type="submit"]');button.disabled=true;button.textContent='Searchingâ€¦';show('results-section');$('search-summary').textContent=`${$('s-destination').value} â€¢ ${$('s-checkin').value} to ${$('s-checkout').value} â€¢ ${$('s-adults').value} adults â€¢ ${$('s-children').value} children â€¢ ${$('s-rooms').value} room${Number($('s-rooms').value)===1?'':'s'}`;$('supplier-status').innerHTML='<div class="searching-status">Searching live suppliersâ€¦</div>';$('live-results').innerHTML='<p class="hint">Waiting for live supplier ratesâ€¦</p>';try{const d=await api('/api/search',{method:'POST',body:JSON.stringify({destination:$('s-destination').value.trim(),destinationCountry:$('s-destination-country').value.trim(),checkin:$('s-checkin').value,checkout:$('s-checkout').value,guests:Number($('s-adults').value),rooms:Number($('s-rooms').value),board:'ROOM_ONLY',country:$('s-country').value,nights:Number($('s-nights').value),children:Number($('s-children').value),hotelName:$('s-hotel').value.trim(),supplierIds:getSelectedSupplierIds()})});currentSearchId=d.searchId;renderResults(d.results,d.connectorStatuses)}catch(err){$('supplier-status').innerHTML='';$('live-results').innerHTML=`<p class="error">${err.message}</p>`}finally{button.disabled=false;button.textContent='Search Hotels'}});
+$('search-form').addEventListener('submit',async e=>{e.preventDefault();syncNights();const supplierIds=getSelectedSupplierIds();if(!supplierIds.length){$('supplier-status').innerHTML='<p class="error">Select at least one supplier.</p>';return;}const button=e.target.querySelector('button[type="submit"]');button.disabled=true;button.textContent='Searching…';show('results-section');$('search-summary').textContent=`${$('s-destination').value} Ã¢â‚¬Â¢ ${$('s-checkin').value} to ${$('s-checkout').value} Ã¢â‚¬Â¢ ${$('s-adults').value} adults Ã¢â‚¬Â¢ ${$('s-children').value} children Ã¢â‚¬Â¢ ${$('s-rooms').value} room${Number($('s-rooms').value)===1?'':'s'}`;$('supplier-status').innerHTML='<div class="searching-status">Searching live suppliers…</div>';$('live-results').innerHTML='<p class="hint">Waiting for live supplier rates…</p>';try{const d=await api('/api/search',{method:'POST',body:JSON.stringify({destination:$('s-destination').value.trim(),destinationCountry:$('s-destination-country').value.trim(),checkin:$('s-checkin').value,checkout:$('s-checkout').value,guests:Number($('s-adults').value),rooms:Number($('s-rooms').value),board:'ROOM_ONLY',country:$('s-country').value,nights:Number($('s-nights').value),children:Number($('s-children').value),hotelName:$('s-hotel').value.trim(),supplierIds:getSelectedSupplierIds()})});currentSearchId=d.searchId;await waitForAedUsdRate();renderResults(d.results,d.connectorStatuses)}catch(err){$('supplier-status').innerHTML='';$('live-results').innerHTML=`<p class="error">${err.message}</p>`}finally{button.disabled=false;button.textContent='Search Hotels'}});
 (async()=>{try{const me=await api('/api/auth/me');$('who').textContent=me.username;hide('login-view');show('app-view');applyRole(me.role);await loadSources();loadSupplierHealth()}catch{}})();
+
+
+
+
+
+
 
 

@@ -450,6 +450,106 @@ async function extractRenderedCurrent(context, cfg, search, state) {
             }
           }
 
+          /*
+           * Hadaf structured room fields.
+           *
+           * The rendered Hadaf room row contains the room category
+           * in .rsp_hr_roomtype_data and cancellation information
+           * in .rsp_hr_roomtype_sinfo_extrs.
+           *
+           * Prefer these structured DOM values over regex parsing.
+           */
+          const structuredRow =
+            el.closest?.('.rsp_tbl_row') ||
+            el.closest?.('.rsp_hotel_results_room_table') ||
+            null;
+
+          if (structuredRow) {
+            const roomEl =
+              structuredRow.querySelector?.('.rsp_hr_roomtype_data');
+
+            /*
+             * Hadaf places cancellation immediately AFTER the
+             * rsp_tbl_row, not inside the row itself.
+             */
+            const cancelEl =
+              structuredRow.querySelector?.('.rsp_hr_roomtype_sinfo_extrs') ||
+              (structuredRow.nextElementSibling?.matches?.('.rsp_hr_roomtype_sinfo_extrs')
+                ? structuredRow.nextElementSibling
+                : null);
+
+            const structuredRoom = roomEl
+              ? textOf(roomEl)
+              : '';
+
+            const structuredCancel = cancelEl
+              ? textOf(cancelEl)
+              : '';
+
+            if (!globalThis.__hadafCancelDiagnosticPrinted) {
+              globalThis.__hadafCancelDiagnosticPrinted = true;
+
+              console.log(
+                'HADAF CANCEL DIAGNOSTIC:',
+                JSON.stringify({
+                  structuredRowClass:
+                    typeof structuredRow.className === 'string'
+                      ? structuredRow.className
+                      : '',
+                  hasCancelEl: !!cancelEl,
+                  cancelTag: cancelEl?.tagName || '',
+                  cancelClass:
+                    typeof cancelEl?.className === 'string'
+                      ? cancelEl.className
+                      : '',
+                  structuredCancel,
+                  rowText: textOf(structuredRow).slice(0, 1500),
+                  nextSiblingClass:
+                    typeof structuredRow?.nextElementSibling?.className === 'string'
+                      ? structuredRow.nextElementSibling.className
+                      : '',
+                  nextSiblingText:
+                    structuredRow?.nextElementSibling
+                      ? textOf(structuredRow.nextElementSibling).slice(0, 500)
+                      : ''
+                }, null, 2)
+              );
+            }
+
+            if (structuredRoom) {
+              room = structuredRoom;
+            }
+
+            if (structuredCancel) {
+              cancel = structuredCancel;
+            }
+
+            /*
+             * Hadaf puts the board name after the " - " in the
+             * room category text, for example:
+             *
+             * Quadruple Room - Room Only
+             * Triple Room - Room Only
+             */
+            if (structuredRoom) {
+              const boardMatch = structuredRoom.match(
+                /(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)/i
+              );
+
+              if (boardMatch) {
+                board = boardMatch[0];
+              }
+
+              const roomMatch = structuredRoom.match(
+                /^(.+?)\s*-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)$/i
+              );
+
+              if (roomMatch) {
+                room = roomMatch[1].trim();
+              }
+            }
+          }
+
           return {
             text,
             room,
@@ -1369,6 +1469,11 @@ async function healthHadafSource(source) {
   }
 }
 module.exports = { searchHadafSource, healthHadafSource };
+
+
+
+
+
 
 
 

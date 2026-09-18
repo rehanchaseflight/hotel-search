@@ -76,6 +76,19 @@ function filterPricedResults(rows) {
   const output = input.filter(row => {
     if (!row || typeof row !== "object") return false;
 
+    // Locanda first returns hotel-list rows without prices.
+    // Rates are loaded later when the user clicks "View Rates".
+    // Keep those hotel rows so they can be displayed in the portal.
+    if (
+      /locanda/i.test(String(row.supplier || row.source || row.connector || "")) &&
+      (
+        String(row.hotel || "").trim() ||
+        String(row.availability || "").trim()
+      )
+    ) {
+      return true;
+    }
+
     for (const field of fields) {
       const v = row[field];
       if (v === undefined || v === null) continue;
@@ -212,12 +225,12 @@ async function runSource(s, search) {
 }
 
 async function searchAll(search, sources = []) {
-  /* ACTIVE SEARCH: Hadaf + RezLive only */
-  /* WanderBeds and Locanda are temporarily paused. */
+  /* ACTIVE SEARCH: Hadaf + WanderBeds + RezLive + Locanda */
   const selected = [
     pick(sources, /hadaf/i),
     pick(sources, /wanderbeds/i),
-    pick(sources, /rezlive/i)
+    pick(sources, /rezlive/i),
+    pick(sources, /locanda/i)
   ].filter(Boolean);
 
   console.log("");
@@ -329,6 +342,9 @@ module.exports = {
   searchAll,
   healthSources
 };
+
+
+
 
 
 
