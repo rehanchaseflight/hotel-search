@@ -1,4 +1,4 @@
-﻿const { chromium } = require('playwright');
+const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 const { decrypt } = require('../crypto-util');
@@ -3367,7 +3367,7 @@ async function getWanderBedsRates(hotelDetailsUrl, search = {}) {
       throw new Error("WanderBeds More Rates links were not found");
     }
 
-    const rates = [];
+const rates = [];
 
     for (const ratesUrl of uniqueRateLinks) {
       try {
@@ -3381,110 +3381,121 @@ async function getWanderBedsRates(hotelDetailsUrl, search = {}) {
         await ratePage.waitForTimeout(1000);
         await blocked(ratePage);
 
-        const bodyText = await ratePage.locator("body")
-          .innerText()
-          .catch(() => "");
+        const cardRates = await ratePage.locator(".card").evaluateAll(
+          (cards) => cards.map((card) => {
+            const clean = (value) =>
+              String(value || "").replace(/\s+/g, " ").trim();
 
-        const text = bodyText.replace(/\s+/g, " ").trim();
+            const room =
+              clean(
+                card.querySelector("h5.card-title")?.innerText ||
+                card.querySelector(".card-title")?.innerText ||
+                ""
+              );
 
-        const avgMatch = text.match(
-          /([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(USD|US\$|\$)\s*avg\/night/i
+            const cardText = clean(card.innerText || "");
+
+            const mealMatch = cardText.match(
+              /Meal\s*:\s*(.*?)(?=\s+Deadline\s*:|\s+[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*(?:USD|US\$|\$))/i
+            );
+
+            const cancellationMatch = cardText.match(
+              /Non[- ]?refundable|Free Cancellation|Refundable/i
+            );
+
+            const deadlineMatch = cardText.match(
+              /Deadline\s*:\s*(.*?)(?=\s+[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*(?:USD|US\$|\$))/i
+            );
+
+            const avgMatch = cardText.match(
+              /([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(USD|US\$|\$)\s*avg\/night/i
+            );
+
+            const totalMatch = cardText.match(
+              /([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(USD|US\$|\$)\s*total\s+for\s+([0-9]+)\s+nights?/i
+            );
+
+            if (!room || !avgMatch) {
+              return null;
+            }
+
+            const price = Number(
+              avgMatch[1].replace(/,/g, "")
+            );
+
+            const totalPrice = totalMatch
+              ? Number(totalMatch[1].replace(/,/g, ""))
+              : null;
+
+            const nights = totalMatch
+              ? Number(totalMatch[3])
+              : null;
+
+            if (!Number.isFinite(price) || price <= 0) {
+              return null;
+            }
+
+            const selectLink = card.querySelector(
+              'a.pagelink[href*="/selecthotel/"]'
+            );
+
+            return {
+              room,
+              meal: mealMatch
+                ? mealMatch[1].trim()
+                : "",
+              cancellation: cancellationMatch
+                ? cancellationMatch[0].trim()
+                : "",
+              deadline: deadlineMatch
+                ? deadlineMatch[1].trim()
+                : "",
+              price,
+              total_price:
+                totalPrice != null &&
+                Number.isFinite(totalPrice)
+                  ? totalPrice
+                  : null,
+              nights:
+                nights != null &&
+                Number.isFinite(nights)
+                  ? nights
+                  : null,
+              url: selectLink
+                ? new URL(
+                    selectLink.getAttribute("href"),
+                    window.location.origin
+                  ).href
+                : window.location.href
+            };
+          })
         );
 
-        const totalMatch = text.match(
-          /([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(USD|US\$|\$)\s*total\s+for\s+([0-9]+)\s+nights?/i
+        for (const cardRate of cardRates) {
+          if (!cardRate) continue;
+
+          rates.push({
+            hotel: String(search.hotel || "").trim(),
+            room: cardRate.room,
+            meal: cardRate.meal,
+            cancellation: cardRate.cancellation,
+            deadline: cardRate.deadline,
+            price: cardRate.price,
+            currency: "USD",
+            total_price: cardRate.total_price,
+            nights: cardRate.nights,
+            url: cardRate.url,
+            view: cardRate.url,
+            source: "wanderbeds"
+          });
+        }
+
+        console.log(
+          "WanderBeds: extracted room cards:",
+          cardRates.filter(Boolean).length,
+          "from",
+          ratesUrl
         );
-
-        if (!avgMatch && !totalMatch) {
-          continue;
-        }
-
-        let price = avgMatch
-          ? Number(avgMatch[1].replace(/,/g, ""))
-          : null;
-
-        const totalPrice = totalMatch
-          ? Number(totalMatch[1].replace(/,/g, ""))
-          : null;
-
-        const nights = totalMatch
-          ? Number(totalMatch[3])
-          : null;
-
-        if (
-          price == null &&
-          totalPrice != null &&
-          nights > 0
-        ) {
-          price = totalPrice / nights;
-        }
-
-        if (
-          price == null ||
-          !Number.isFinite(price) ||
-          price <= 0
-        ) {
-          continue;
-        }
-
-        const mealMatch = text.match(
-          /Meal\s*:\s*([^]+?)(?=\s+Deadline\s*:|\s+[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*(?:USD|US\$|\$))/i
-        );
-
-        const cancellationMatch = text.match(
-          /Non[- ]?refundable|Free Cancellation|Refundable/i
-        );
-
-        const deadlineMatch = text.match(
-          /Deadline\s*:\s*([^]+?)(?=\s+(?:Non[- ]?refundable|Free Cancellation|Refundable)|\s+[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*(?:USD|US\$|\$))/i
-        );
-
-        let room = "";
-
-        const roomTitle = await ratePage.locator(
-          ".card:visible h5.card-title"
-        ).first().innerText().catch(() => "");
-
-        if (roomTitle) {
-          room = roomTitle
-            .replace(/\s+/g, " ")
-            .trim();
-        }
-
-        if (!room) {
-          const roomMatch = text.match(
-            /(?:Room Type|Room)\s*:\s*([^]+?)(?=\s+(?:Meal|Deadline|Non[- ]?refundable|Free Cancellation|Refundable)\s*:|\s+[0-9][0-9,]*(?:\.[0-9]{1,2})?\s*(?:USD|US\$|\$))/i
-          );
-
-          if (roomMatch) {
-            room = roomMatch[1]
-              .replace(/\s+/g, " ")
-              .trim();
-          }
-        }
-
-        if (!room || room.length > 180) {
-          room = String(search.hotel || "Hotel rate").trim();
-        }
-
-        rates.push({
-          hotel: String(search.hotel || "").trim(),
-          room,
-          meal: mealMatch ? mealMatch[1].trim() : "",
-          cancellation: cancellationMatch
-            ? cancellationMatch[0].trim()
-            : "",
-          deadline: deadlineMatch
-            ? deadlineMatch[1].trim()
-            : "",
-          price,
-          currency: "USD",
-          total_price: totalPrice,
-          nights,
-          url: ratesUrl,
-          view: ratesUrl,
-          source: "wanderbeds"
-        });
       } catch (e) {
         console.log(
           "WanderBeds: rate page extraction failed:",
@@ -3492,6 +3503,7 @@ async function getWanderBedsRates(hotelDetailsUrl, search = {}) {
         );
       }
     }
+
     const uniqueRates = [];
     const seen = new Set();
 
@@ -3518,7 +3530,7 @@ async function getWanderBedsRates(hotelDetailsUrl, search = {}) {
       rates: uniqueRates
     };
   } finally {
-    await ratePage.close().catch(() => {});
+    console.log("WanderBeds: keeping visible rates tab open:", ratePage.url());
   }
 }
 
@@ -3709,6 +3721,8 @@ module.exports = {
   wanderBedsManualLoginStatus,
   getWanderBedsRates
 };
+
+
 
 
 

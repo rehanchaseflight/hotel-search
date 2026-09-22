@@ -60,7 +60,7 @@ async function chooseDestination(frame, value) {
     .map(x => clean(x))
     .filter(Boolean);
 
-  const requestedCity = parts[0] || rawValue;
+  const requestedCity = ((parts[0] || rawValue).trim().toLowerCase() === 'medina') ? 'Madinah' : (parts[0] || rawValue);
   const requestedCountry =
     parts.length >= 2
       ? parts.slice(1).join(' - ')
@@ -77,6 +77,17 @@ async function chooseDestination(frame, value) {
 
   await input.fill(requestedCity);
   await frame.waitForTimeout(1500);
+
+  try {
+    await frame.waitForFunction(() => {
+      const el = document.querySelector('#lpPannel_txtV5City');
+      return !el || !el.classList.contains('ui-autocomplete-loading');
+    }, { timeout: 10000 });
+  } catch (e) {
+    console.log('Hadaf autocomplete loading wait:', e.message);
+  }
+
+  await frame.waitForTimeout(500);
 
   const suggestions = await frame.locator(
     'li:visible, [role="option"]:visible'
@@ -143,11 +154,16 @@ async function chooseDestination(frame, value) {
     JSON.stringify(scored, null, 2)
   );
 
-  const best = scored[0];
+  const best = countryNorm
+    ? scored.find(item => {
+        const textNorm = norm(item.text);
+        return textNorm.includes(countryNorm);
+      })
+    : scored[0];
 
   if (!best || best.score < 50) {
     throw new Error(
-      `Hadaf could not safely match destination "${rawValue}". Suggestions: ${JSON.stringify(suggestions)}`
+      `Hadaf could not safely match destination "${rawValue}". Requested country "${requestedCountry}" was not matched. Suggestions: ${JSON.stringify(suggestions)}`
     );
   }
 
@@ -446,6 +462,106 @@ async function extractRenderedCurrent(context, cfg, search, state) {
                 board = board || t.match(boardRe)?.[0] || '';
                 cancel = cancel || t.match(cancelRe)?.[0] || '';
                 break;
+              }
+            }
+          }
+
+          /*
+           * Hadaf structured room fields.
+           *
+           * The rendered Hadaf room row contains the room category
+           * in .rsp_hr_roomtype_data and cancellation information
+           * in .rsp_hr_roomtype_sinfo_extrs.
+           *
+           * Prefer these structured DOM values over regex parsing.
+           */
+          const structuredRow =
+            el.closest?.('.rsp_tbl_row') ||
+            el.closest?.('.rsp_hotel_results_room_table') ||
+            null;
+
+          if (structuredRow) {
+            const roomEl =
+              structuredRow.querySelector?.('.rsp_hr_roomtype_data');
+
+            /*
+             * Hadaf places cancellation immediately AFTER the
+             * rsp_tbl_row, not inside the row itself.
+             */
+            const cancelEl =
+              structuredRow.querySelector?.('.rsp_hr_roomtype_sinfo_extrs') ||
+              (structuredRow.nextElementSibling?.matches?.('.rsp_hr_roomtype_sinfo_extrs')
+                ? structuredRow.nextElementSibling
+                : null);
+
+            const structuredRoom = roomEl
+              ? textOf(roomEl)
+              : '';
+
+            const structuredCancel = cancelEl
+              ? textOf(cancelEl)
+              : '';
+
+            if (!globalThis.__hadafCancelDiagnosticPrinted) {
+              globalThis.__hadafCancelDiagnosticPrinted = true;
+
+              console.log(
+                'HADAF CANCEL DIAGNOSTIC:',
+                JSON.stringify({
+                  structuredRowClass:
+                    typeof structuredRow.className === 'string'
+                      ? structuredRow.className
+                      : '',
+                  hasCancelEl: !!cancelEl,
+                  cancelTag: cancelEl?.tagName || '',
+                  cancelClass:
+                    typeof cancelEl?.className === 'string'
+                      ? cancelEl.className
+                      : '',
+                  structuredCancel,
+                  rowText: textOf(structuredRow).slice(0, 1500),
+                  nextSiblingClass:
+                    typeof structuredRow?.nextElementSibling?.className === 'string'
+                      ? structuredRow.nextElementSibling.className
+                      : '',
+                  nextSiblingText:
+                    structuredRow?.nextElementSibling
+                      ? textOf(structuredRow.nextElementSibling).slice(0, 500)
+                      : ''
+                }, null, 2)
+              );
+            }
+
+            if (structuredRoom) {
+              room = structuredRoom;
+            }
+
+            if (structuredCancel) {
+              cancel = structuredCancel;
+            }
+
+            /*
+             * Hadaf puts the board name after the " - " in the
+             * room category text, for example:
+             *
+             * Quadruple Room - Room Only
+             * Triple Room - Room Only
+             */
+            if (structuredRoom) {
+              const boardMatch = structuredRoom.match(
+                /(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)/i
+              );
+
+              if (boardMatch) {
+                board = boardMatch[0];
+              }
+
+              const roomMatch = structuredRoom.match(
+                /^(.+?)\s*-\s*(?:Room Only|Breakfast Included|Bed and Breakfast|Half Board|Full Board|All Inclusive)$/i
+              );
+
+              if (roomMatch) {
+                room = roomMatch[1].trim();
               }
             }
           }
@@ -1369,6 +1485,12 @@ async function healthHadafSource(source) {
   }
 }
 module.exports = { searchHadafSource, healthHadafSource };
+
+
+
+
+
+
 
 
 

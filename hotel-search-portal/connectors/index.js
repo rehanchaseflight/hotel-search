@@ -1,12 +1,15 @@
 ﻿const { searchHadafSource, healthHadafSource } = require('./hadaf-browser-v6');
 const { searchWanderBedsSource, healthWanderBedsSource } = require('./wanderbeds-browser-v1');
 const { searchBrowserSource } = require('./browser');
+const { getRezLiveSessionStatus, readDevToolsEndpoint } = require('./rezlive-session');
 
+const { searchBook4TripHttpSource, healthBook4TripHttpSource } = require('./book4trip-http');
 const CONNECTORS = [
   { id: 'hadaf', name: 'Hadaf Holidays', type: 'browser' },
   { id: 'wanderbeds', name: 'WanderBeds', type: 'browser' },
   { id: 'locanda', name: 'Locanda', type: 'browser' },
-  { id: 'rezlive', name: 'RezLive', type: 'browser' }
+  { id: 'rezlive', name: 'RezLive', type: 'browser' },
+  { id: 'book4trip', name: 'Book4Trip', type: 'browser' }
 ];
 
 function filterPricedResults(rows) {
@@ -47,7 +50,7 @@ function filterPricedResults(rows) {
 
       if (
         !value ||
-        /^(n\/?a|na|none|null|undefined|not available|not available price|-|—)$/i.test(value)
+        /^(n\/?a|na|none|null|undefined|not available|not available price|-|â€”)$/i.test(value)
       ) {
         continue;
       }
@@ -76,6 +79,19 @@ function filterPricedResults(rows) {
   const output = input.filter(row => {
     if (!row || typeof row !== "object") return false;
 
+    // Locanda first returns hotel-list rows without prices.
+    // Rates are loaded later when the user clicks "View Rates".
+    // Keep those hotel rows so they can be displayed in the portal.
+    if (
+      /locanda/i.test(String(row.supplier || row.source || row.connector || "")) &&
+      (
+        String(row.hotel || "").trim() ||
+        String(row.availability || "").trim()
+      )
+    ) {
+      return true;
+    }
+
     for (const field of fields) {
       const v = row[field];
       if (v === undefined || v === null) continue;
@@ -84,7 +100,7 @@ function filterPricedResults(rows) {
 
       if (
         !value ||
-        /^(n\/?a|na|none|null|undefined|not available|not available price|-|—)$/i.test(value)
+        /^(n\/?a|na|none|null|undefined|not available|not available price|-|â€”)$/i.test(value)
       ) {
         continue;
       }
@@ -151,6 +167,36 @@ function pick(sources, pattern) {
 }
 
 async function runSource(s, search) {
+    if (
+      s.id === 'book4trip' ||
+      /book4trip/i.test(String(s.name || ''))
+    ) {
+      console.log("BOOK4TRIP ROUTING TRACE: HTTP CONNECTOR SELECTED", {
+        id: s.id,
+        name: s.name
+      });
+      const book4TripResults = await searchBook4TripHttpSource(s, search);
+
+      const book4TripRows =
+        Array.isArray(book4TripResults)
+          ? book4TripResults
+          : Array.isArray(book4TripResults?.results)
+            ? book4TripResults.results
+            : [];
+
+      console.log(
+        "BOOK4TRIP ROUTING TRACE: RETURNED RESULT COUNT",
+        book4TripRows.length
+      );
+
+      return {
+        results: book4TripRows,
+        configured: true,
+        error: null
+      };
+    }
+
+
   const name = String(s.name || '');
   const id = String(s.id || '');
 
@@ -212,12 +258,13 @@ async function runSource(s, search) {
 }
 
 async function searchAll(search, sources = []) {
-  /* ACTIVE SEARCH: Hadaf + RezLive only */
-  /* WanderBeds and Locanda are temporarily paused. */
+  /* ACTIVE SEARCH: Hadaf + WanderBeds + RezLive + Locanda */
   const selected = [
     pick(sources, /hadaf/i),
     pick(sources, /wanderbeds/i),
-    pick(sources, /rezlive/i)
+    pick(sources, /rezlive/i),
+    pick(sources, /locanda/i),
+    pick(sources, /book4trip/i)
   ].filter(Boolean);
 
   console.log("");
@@ -262,11 +309,69 @@ async function searchAll(search, sources = []) {
   };
 }
 
+async function getLocandaManualSessionStatus() {
+  try {
+    const puppeteer = require('puppeteer-core');
+
+    const endpoint = readDevToolsEndpoint();
+
+    const browser = await puppeteer.connect({
+      browserWSEndpoint: endpoint,
+      handleDevToolsAsPage: true,
+      defaultViewport: null,
+      protocolTimeout: 30000
+    });
+
+    try {
+      const pages = await browser.pages();
+
+      for (const page of pages) {
+        try {
+          const url = String(page.url() || '').toLowerCase();
+
+          if (!url.includes('app.locandahub.com')) {
+            continue;
+          }
+
+          if (url.includes('/agent/booking/')) {
+            return {
+              configured: true,
+              signedIn: true,
+              error: null
+            };
+          }
+
+          return {
+            configured: true,
+            signedIn: false,
+            error: null
+          };
+        } catch (_) {}
+      }
+
+      return {
+        configured: true,
+        signedIn: false,
+        error: 'Locanda page is not open'
+      };
+    } finally {
+      browser.disconnect();
+    }
+  } catch (e) {
+    return {
+      configured: true,
+      signedIn: false,
+      error: e.message || 'Unable to check Locanda session'
+    };
+  }
+}
 async function healthSources(sources = []) {
   const selected = [
     pick(sources, /hadaf/i),
     pick(sources, /wanderbeds/i),
-    pick(sources, /rezlive/i)
+    pick(sources, /rezlive/i),
+    pick(sources, /book4trip/i),
+    pick(sources, /locanda/i)
   ].filter(Boolean);
 
   return Promise.all(
@@ -292,30 +397,45 @@ async function healthSources(sources = []) {
           : /wanderbeds/i.test(name)
             ? healthWanderBedsSource(s)
             : /rezlive/i.test(name)
-              ? {
-                  configured: !!(
-                    s.login_url &&
-                    s.site_username &&
-                    s.site_password_enc
-                  ),
-                  error: null
-                }
-              : searchBrowserSource(s, {
-                  destination: 'Madinah - Saudi Arabia',
-                  checkin: '2026-10-02',
-                  checkout: '2026-10-03',
-                  guests: 2,
-                  rooms: 1,
-                  board: 'ROOM_ONLY'
-                })
-      );
+              ? (() => {
+                  const session = getRezLiveSessionStatus();
+
+                  return {
+                    configured: !!(
+                      s.login_url &&
+                      s.site_username &&
+                      s.site_password_enc
+                    ),
+                    signedIn: session.status === 'connected',
+                    error: session.status === 'connected'
+                      ? null
+                      : (session.error || 'RezLive session is not signed in')
+                  };
+                })()
+              : /book4trip/i.test(name)
+                ? await healthBook4TripHttpSource(s)
+                : /locanda/i.test(name)
+                  ? await getLocandaManualSessionStatus()
+                  : searchBrowserSource(s, {
+                    destination: 'Madinah - Saudi Arabia',
+                    checkin: '2026-10-02',
+                    checkout: '2026-10-03',
+                    guests: 2,
+                    rooms: 1,
+                    board: 'ROOM_ONLY'
+                  })
+      );      const isManual = /rezlive|locanda|book4trip/i.test(name);
 
       return {
         id: String(s.id),
         name: s.name,
         configured: r.configured,
-        ok: !r.error,
-        status: r.error ? 'offline' : 'live',
+        ok: isManual ? !!r.signedIn : !r.error,
+        manual: isManual,
+        signedIn: isManual ? !!r.signedIn : undefined,
+        status: isManual
+          ? (r.signedIn ? 'signed_in' : 'not_signed_in')
+          : (r.error ? 'offline' : 'live'),
         error: r.error || null,
         checkedAt: new Date().toISOString()
       };
@@ -329,6 +449,19 @@ module.exports = {
   searchAll,
   healthSources
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

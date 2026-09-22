@@ -1,6 +1,7 @@
-const { chromium } = require('playwright');
+﻿const { chromium } = require('playwright');
 const { decrypt } = require('../crypto-util');
 const rezliveSession = require('./rezlive-session');
+const locandaBrowser = require('./locanda-browser-v1');
 
 function fillTemplate(template, search) {
   return String(template || '')
@@ -302,6 +303,185 @@ async function extractRatesFromFrame(frame, cfg) {
               card.id ||
               '';
 
+            /* RezLive More Details metadata */
+            let rezliveDetailsMeta = {
+              hotelId: '',
+              roomId: '',
+              filepostfix: ''
+            };
+
+            /*
+             * RezLive's More Details link and native board-basis
+             * form belong to the same .hotel_detail container.
+             *
+             * Resolve the current result's own container first.
+             * Never use the first document-wide hotelviewmore link.
+             */
+            try {
+              let detailContainer = null;
+
+              /*
+               * First try the result card itself.
+               */
+              if (
+                card.classList &&
+                card.classList.contains("hotel_detail")
+              ) {
+                detailContainer = card;
+              }
+
+              /*
+               * Then walk upward from the result card.
+               */
+              if (!detailContainer) {
+                let scope = card;
+
+                for (
+                  let level = 0;
+                  level < 12 && scope;
+                  level++,
+                  scope = scope.parentElement
+                ) {
+                  if (
+                    scope.classList &&
+                    scope.classList.contains(
+                      "hotel_detail"
+                    )
+                  ) {
+                    detailContainer = scope;
+                    break;
+                  }
+                }
+              }
+
+              /*
+               * If the result card is a nested portion of the
+               * hotel result, inspect its descendants as a final
+               * card-local fallback.
+               */
+              if (!detailContainer) {
+                const candidate =
+                  card.querySelector(
+                    ".hotel_detail"
+                  );
+
+                if (candidate) {
+                  detailContainer = candidate;
+                }
+              }
+
+              let moreDetails = null;
+
+              if (detailContainer) {
+                moreDetails =
+                  detailContainer.querySelector(
+                    "a[onclick*='hotelviewmore']"
+                  );
+              }
+
+              /*
+               * Last safe fallback:
+               * find a .hotel_detail whose text contains the
+               * current hotel name, then use ONLY its own link.
+               *
+               * This does not search arbitrary document parents.
+               */
+              if (!moreDetails && hotel) {
+                const normalizedHotel =
+                  clean(hotel).toLowerCase();
+
+                const containers =
+                  Array.from(
+                    document.querySelectorAll(
+                      ".hotel_detail"
+                    )
+                  );
+
+                for (const container of containers) {
+                  const containerText =
+                    clean(
+                      container.innerText || ''
+                    ).toLowerCase();
+
+                  if (
+                    containerText.includes(
+                      normalizedHotel
+                    )
+                  ) {
+                    const candidate =
+                      container.querySelector(
+                        "a[onclick*='hotelviewmore']"
+                      );
+
+                    if (candidate) {
+                      moreDetails = candidate;
+                      detailContainer =
+                        container;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              if (moreDetails) {
+                const onclick = String(
+                  moreDetails.getAttribute(
+                    "onclick"
+                  ) || ''
+                );
+
+                const match = onclick.match(
+                  /hotelviewmore\(\s*['"]?([^,'")\s]+)['"]?\s*,\s*['"]?([^,'")\s]+)['"]?\s*,\s*['"]([^'"]+)['"]\s*\)/
+                );
+
+                if (match) {
+                  rezliveDetailsMeta = {
+                    hotelId:
+                      String(
+                        match[1] || ''
+                      ).trim(),
+
+                    roomId:
+                      String(
+                        match[2] || ''
+                      ).trim(),
+
+                    filepostfix:
+                      String(
+                        match[3] || ''
+                      ).trim()
+                  };
+
+                  console.log(
+                    "RezLive metadata mapped:",
+                    clean(hotel),
+                    "=>",
+                    JSON.stringify(
+                      rezliveDetailsMeta
+                    )
+                  );
+                }
+              }
+
+              if (
+                !rezliveDetailsMeta.hotelId ||
+                !rezliveDetailsMeta.filepostfix
+              ) {
+                console.log(
+                  "RezLive metadata not mapped for hotel:",
+                  clean(hotel)
+                );
+              }
+            } catch (metaError) {
+              console.log(
+                'RezLive metadata extraction warning:',
+                String(
+                  metaError &&
+                  metaError.message ||
+                  metaError
+                )
+              );
+            }
             out.push({
               hotel,
               address,
@@ -314,6 +494,7 @@ async function extractRatesFromFrame(frame, cfg) {
               price,
               currency,
               hotelId,
+              rezliveDetailsMeta,
               raw: {
                 source: 'RezLive',
                 hotel,
@@ -321,7 +502,8 @@ async function extractRatesFromFrame(frame, cfg) {
                 availability,
                 price,
                 currency,
-                hotelId
+                hotelId,
+                rezliveDetailsMeta
               }
             });
           }
@@ -2574,9 +2756,9 @@ async function rezLiveListSignature() {
                  * Common RezLive/Bootstrap/jQuery next controls.
                  */
                 const nextText =
-                  /^(next|›|»|>|→)$/i.test(value) ||
-                  /^(next|›|»|>|→)$/i.test(aria) ||
-                  /^(next|›|»|>|→)$/i.test(title);
+                  /^(next|ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Âº|ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»|>|ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢)$/i.test(value) ||
+                  /^(next|ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Âº|ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»|>|ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢)$/i.test(aria) ||
+                  /^(next|ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Âº|ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»|>|ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢)$/i.test(title);
 
                 const nextWord =
                   /\bnext\b/i.test(meta);
@@ -3212,6 +3394,879 @@ console.log(
     page.off("response", responseListener);
   }
 }
+
+async function getRezLiveHotelDetails(details) {
+  const hotelName = String(
+    details?.hotel ||
+    details?.hotelName ||
+    ""
+  ).trim();
+
+  let hotelId = String(details?.hotelId || "").trim();
+  let roomId = String(details?.roomId || "").trim();
+  let filepostfix = String(details?.filepostfix || "").trim();
+
+  if (!hotelId || !roomId || !filepostfix) {
+    throw new Error("RezLive hotel details information is incomplete");
+  }
+
+  if (!rezliveSession.hasRezLiveSession()) {
+    throw new Error("RezLive Chrome session is not available");
+  }
+
+  let browser = null;
+
+  try {
+    browser = await chromium.connectOverCDP(
+      rezliveSession.readDevToolsEndpoint()
+    );
+
+    const context = browser.contexts()[0];
+
+    if (!context) {
+      throw new Error("RezLive Chrome context not found");
+    }
+
+    const page = context.pages().find(p => {
+      try {
+        return /rezlive\.com/i.test(new URL(p.url()).hostname);
+      } catch {
+        return false;
+      }
+    });
+
+    if (!page) {
+      throw new Error("RezLive tab not found");
+    }
+
+    page.setDefaultTimeout(60000);
+
+    const result = await page.evaluate(
+      async ({ hotelName, hotelId, roomId, filepostfix }) => {
+
+        const clean = value =>
+          String(value || "")
+            .replace(/\s+/g, " ")
+            .trim();
+
+        /*
+         * Open More Details using RezLive's real JavaScript.
+         */
+        if (typeof window.hotelviewmore !== "function") {
+          throw new Error(
+            "RezLive hotelviewmore function is not available"
+          );
+        }
+
+        /*
+         * REZLIVE NATIVE HOTEL NAME SEARCH
+         *
+         * The portal's original result can contain stale
+         * hotelviewmore metadata. RezLive itself provides a
+         * reliable Hotel Name filter:
+         *
+         *   #hotelnameFilter
+         *   #goHotelFilter
+         *   SortData('Hotelnamefilter', value, '')
+         *
+         * Search the hotel again first. This generates fresh
+         * hotelviewmore() metadata for the selected hotel.
+         */
+        let freshLink = null;
+        if (hotelName) {
+          const filterInput =
+            document.querySelector(
+              "#hotelnameFilter"
+            );
+
+          const filterGo =
+            document.querySelector(
+              "#goHotelFilter"
+            );
+
+          if (!filterInput || !filterGo) {
+            throw new Error(
+              "RezLive hotel name filter controls were not found"
+            );
+          }
+
+          console.log(
+            "REZLIVE HOTEL NAME SEARCH:",
+            hotelName
+          );
+
+          filterInput.value = hotelName;
+
+          filterInput.dispatchEvent(
+            new Event(
+              "input",
+              { bubbles: true }
+            )
+          );
+
+          filterInput.dispatchEvent(
+            new Event(
+              "change",
+              { bubbles: true }
+            )
+          );
+
+          /*
+           * This is exactly the function used by the
+           * native Go button:
+           *
+           * SortData(
+           *   'Hotelnamefilter',
+           *   $('#hotelnameFilter').val(),
+           *   ''
+           * )
+           */
+          if (
+            typeof window.SortData ===
+            "function"
+          ) {
+            window.SortData(
+              "Hotelnamefilter",
+              hotelName,
+              ""
+            );
+          } else {
+            filterGo.click();
+          }
+
+          /*
+           * Wait for the filtered hotel result.
+           *
+           * RezLive normally returns one .hotel_detail
+           * for an exact hotel-name search.
+           */
+          /* freshLink declared in outer scope */
+
+          const searchStart =
+            Date.now();
+
+          while (
+            Date.now() - searchStart <
+            30000
+          ) {
+            const containers =
+              Array.from(
+                document.querySelectorAll(
+                  ".hotel_detail"
+                )
+              );
+
+            const wanted =
+              hotelName
+                .toLowerCase()
+                .replace(/\\s+/g, " ")
+                .trim();
+
+            for (
+              const container of containers
+            ) {
+              const containerText =
+                String(
+                  container.innerText || ""
+                )
+                  .toLowerCase()
+                  .replace(/\\s+/g, " ")
+                  .trim();
+
+              if (
+                !containerText.includes(
+                  wanted
+                )
+              ) {
+                continue;
+              }
+
+              const candidate =
+                container.querySelector(
+                  "a[onclick*='hotelviewmore']"
+                );
+
+              if (candidate) {
+                freshLink = candidate;
+                break;
+              }
+            }
+
+            if (freshLink) {
+              break;
+            }
+
+            await new Promise(
+              resolve =>
+                setTimeout(
+                  resolve,
+                  300
+                )
+            );
+          }
+
+          if (!freshLink) {
+            throw new Error(
+              "RezLive hotel search completed but matching hotel result was not found: " +
+              hotelName
+            );
+          }
+
+          const freshOnclick =
+            String(
+              freshLink.getAttribute(
+                "onclick"
+              ) || ""
+            );
+
+          const freshMatch =
+            freshOnclick.match(
+              /hotelviewmore\\(\\s*['"]?([^,'")\\s]+)['"]?\\s*,\\s*['"]?([^,'")\\s]+)['"]?\\s*,\\s*['"]([^'"]+)['"]\\s*\\)/
+            );
+
+          if (!freshMatch) {
+            throw new Error(
+              "RezLive fresh hotelviewmore metadata could not be parsed"
+            );
+          }
+
+          hotelId =
+            String(
+              freshMatch[1] || ""
+            ).trim();
+
+          roomId =
+            String(
+              freshMatch[2] || ""
+            ).trim();
+
+          filepostfix =
+            String(
+              freshMatch[3] || ""
+            ).trim();
+
+          console.log(
+            "REZLIVE FRESH METADATA:",
+            JSON.stringify({
+              hotel: hotelName,
+              hotelId,
+              roomId,
+              filepostfix
+            })
+          );
+        }
+
+        /*
+         * Now use the fresh metadata generated by RezLive.
+         *
+         * IMPORTANT:
+         * freshLink is the exact hotel link found after using
+         * RezLive's native hotel-name filter + Go button.
+         * Keep using this exact link/container below.
+         */
+        const rezliveFreshHotelLink = freshLink;
+
+        window.hotelviewmore(
+          hotelId,
+          roomId,
+          filepostfix
+        );
+
+        /*
+         * Wait for the hotel details modal.
+         */
+        const modalStart = Date.now();
+
+        while (Date.now() - modalStart < 30000) {
+          const modal =
+            document.querySelector(
+              "#displaycomparemodel"
+            );
+
+          if (
+            modal &&
+            clean(modal.innerText).length > 50
+          ) {
+            break;
+          }
+
+          await new Promise(resolve =>
+            setTimeout(resolve, 300)
+          );
+        }
+
+        await new Promise(resolve =>
+          setTimeout(resolve, 1000)
+        );
+
+        const modal =
+          document.querySelector(
+            "#displaycomparemodel"
+          );
+
+        if (!modal) {
+          throw new Error(
+            "RezLive More Details modal was not created"
+          );
+        }
+
+        /*
+         * The first response is the hotel description shell.
+         * Room Availability is loaded separately.
+         *
+         * Find the actual Room Availability tab/link.
+         */
+        const availabilityCandidates =
+          Array.from(
+            modal.querySelectorAll(
+              "a, li, button, [role='tab']"
+            )
+          );
+
+        const availabilityTarget =
+          availabilityCandidates.find(el =>
+            /room\s*availability/i.test(
+              clean(el.textContent)
+            )
+          );
+
+        if (availabilityTarget) {
+          availabilityTarget.scrollIntoView({
+            block: "center"
+          });
+
+          availabilityTarget.click();
+        } else {
+
+          /*
+           * Some RezLive versions expose the tab through
+           * an href containing roomavailibility.
+           */
+          const hrefTarget =
+            modal.querySelector(
+              "a[href*='roomavailibility'], " +
+              "a[href*='roomavailability'], " +
+              "[data-target*='roomavailibility'], " +
+              "[data-target*='roomavailability']"
+            );
+
+          if (hrefTarget) {
+            hrefTarget.click();
+          }
+        }
+
+        /*
+         * The Room Availability tab itself only switches the Bootstrap tab.
+         * RezLive loads the actual room/rate data through its native
+         * sorthotelwiseboardbasis() function.
+         *
+         * Reproduce that native call using the original hotel-card values.
+         */
+        if (typeof window.sorthotelwiseboardbasis !== "function") {
+          throw new Error(
+            "RezLive sorthotelwiseboardbasis function is not available"
+          );
+        }
+
+        /*
+         * REZLIVE FRESH HOTEL LINK REUSE
+         *
+         * The hotel was already located AFTER:
+         *
+         *   hotelnameFilter -> hotel name -> Go
+         *
+         * and its exact hotelviewmore() link was captured as freshLink.
+         *
+         * DO NOT search document-wide again.
+         * The first hotel on the page can be a different property.
+         */
+        const targetDetailLink = rezliveFreshHotelLink;
+
+        if (!targetDetailLink) {
+          throw new Error(
+            "RezLive fresh filtered hotel link is unavailable"
+          );
+        }
+
+        console.log(
+          "REZLIVE USING FILTERED HOTEL LINK:",
+          targetDetailLink.getAttribute("onclick") || ""
+        );
+        let nativeContainer =
+          targetDetailLink;
+
+        for (
+          let level = 0;
+          level < 10 &&
+          nativeContainer;
+          level++,
+          nativeContainer =
+            nativeContainer.parentElement
+        ) {
+          if (
+            nativeContainer.classList &&
+            nativeContainer.classList.contains(
+              "hotel_detail"
+            )
+          ) {
+            break;
+          }
+        }
+
+        if (
+          !nativeContainer ||
+          !nativeContainer.classList ||
+          !nativeContainer.classList.contains(
+            "hotel_detail"
+          )
+        ) {
+          throw new Error(
+            "RezLive hotel_detail container for requested hotel was not found"
+          );
+        }
+
+        const nativeForm =
+          nativeContainer.querySelector(
+            "form[id^='hotelwiseboardbasis_']"
+          );
+
+        if (!nativeForm) {
+          throw new Error(
+            "RezLive native hotelwiseboardbasis form was not found inside requested hotel container"
+          );
+        }
+
+        const nativeFormId =
+          nativeForm.id;
+
+        const nativeRecMatch =
+          nativeFormId.match(
+            /^hotelwiseboardbasis_(\d+)_/
+          );
+
+        if (!nativeRecMatch) {
+          throw new Error(
+            "RezLive native hotelwiseboardbasis record ID was not found"
+          );
+        }
+
+        const nativeRecId =
+          Number(nativeRecMatch[1]);
+
+        window.sorthotelwiseboardbasis(
+          filepostfix,
+          nativeFormId,
+          nativeRecId
+        );
+
+        /*
+         * Room Availability is loaded by a separate AJAX request.
+         * Do not use generic modal text as the readiness signal because
+         * the hotel description itself can contain room/price/board text.
+         *
+         * Wait for RezLive's actual room-rate containers instead.
+         */
+        const roomStart = Date.now();
+        const boardSelector =
+          "#boardbasislist" + String(nativeRecId) + " .search-details-box";
+
+        while (Date.now() - roomStart < 30000) {
+          const board = document.querySelector(
+            "#boardbasislist" + String(nativeRecId)
+          );
+
+          const roomCards = board
+            ? board.querySelectorAll(".search-details-box").length
+            : 0;
+
+          if (roomCards > 0) {
+            break;
+          }
+
+          await new Promise(resolve =>
+            setTimeout(resolve, 500)
+          );
+        }
+
+        const boardReady =
+          document.querySelector(
+            "#boardbasislist" + String(nativeRecId)
+          );
+
+        const roomCardCount =
+          boardReady
+            ? boardReady.querySelectorAll(".search-details-box").length
+            : 0;
+
+        if (!roomCardCount) {
+          throw new Error(
+            "RezLive Room Availability did not load priced room containers within 30 seconds"
+          );
+        }
+
+        /*
+         * Search the entire modal for room containers.
+         */
+        let containers = Array.from(
+          modal.querySelectorAll(
+            ".search-details-box"
+          )
+        );
+
+        /*
+         * If the expected class is absent, find parents
+         * of room-label elements.
+         */
+        if (!containers.length) {
+          const labels = Array.from(
+            modal.querySelectorAll(
+              ".room-label"
+            )
+          );
+
+          for (const label of labels) {
+            const parent =
+              label.closest(
+                ".search-details-box, tr, .room-details, .room-detail, .room-row, .row"
+              ) ||
+              label.parentElement;
+
+            if (
+              parent &&
+              !containers.includes(parent)
+            ) {
+              containers.push(parent);
+            }
+          }
+        }
+
+        /*
+         * Last fallback: inspect table rows.
+         */
+        if (!containers.length) {
+          containers = Array.from(
+            modal.querySelectorAll(
+              "tr"
+            )
+          );
+        }
+
+        const boardCandidates = [
+          "Room Only",
+          "Breakfast",
+          "Half Board",
+          "Full Board",
+          "All Inclusive"
+        ];
+
+        const moneyRe =
+          /(?:USD|US\$|SAR|AED|EUR|GBP|PKR|\$)\s*[\d,]+(?:\.\d{1,2})?/gi;
+
+        const rates = [];
+
+        for (const container of containers) {
+
+          const text =
+            clean(
+              container.innerText || ""
+            );
+
+          if (!text) {
+            continue;
+          }
+
+          let room = "";
+
+          const roomEl =
+            container.querySelector(
+              ".room-label"
+            );
+
+          if (roomEl) {
+            room =
+              clean(
+                roomEl.textContent
+              );
+          }
+
+          /*
+           * Table fallback.
+           */
+          if (!room) {
+            const cells =
+              Array.from(
+                container.querySelectorAll(
+                  "td, th"
+                )
+              )
+                .map(cell =>
+                  clean(cell.innerText)
+                )
+                .filter(Boolean);
+
+            if (
+              cells.length &&
+              !/^(room|inclusion|board|per room rate|total|cancellation)$/i.test(
+                cells[0]
+              )
+            ) {
+              room = cells[0];
+            }
+          }
+
+          let board = "";
+
+          for (const candidate of boardCandidates) {
+            if (
+              text
+                .toLowerCase()
+                .includes(
+                  candidate.toLowerCase()
+                )
+            ) {
+              board = candidate;
+              break;
+            }
+          }
+
+          const moneyMatches =
+            text.match(moneyRe) || [];
+
+          let perRoomRate = "";
+          let total = "";
+
+          if (moneyMatches.length === 1) {
+            perRoomRate =
+              clean(moneyMatches[0]);
+            total =
+              clean(moneyMatches[0]);
+          } else if (
+            moneyMatches.length > 1
+          ) {
+            perRoomRate =
+              clean(moneyMatches[0]);
+
+            total =
+              clean(
+                moneyMatches[
+                  moneyMatches.length - 1
+                ]
+              );
+          }
+
+          let inclusion = "";
+
+          const inclusionSelectors = [
+            ".inclusion",
+            ".inclusion-text",
+            ".room-inclusion",
+            ".room-description",
+            ".hotelroom-description"
+          ];
+
+          for (const selector of inclusionSelectors) {
+            const el =
+              container.querySelector(
+                selector
+              );
+
+            if (el) {
+              const value =
+                clean(el.textContent);
+
+              if (value) {
+                inclusion = value;
+                break;
+              }
+            }
+          }
+
+          const cancellationLink =
+            Array.from(
+              container.querySelectorAll("a")
+            ).find(a =>
+              /Cancellation Policy/i.test(
+                clean(a.textContent)
+              )
+            );
+
+          let cancellationArgs = "";
+
+          if (cancellationLink) {
+            const onclick =
+              String(
+                cancellationLink.getAttribute(
+                  "onclick"
+                ) || ""
+              );
+
+            const match =
+              onclick.match(
+                /CancellationPolicy\(([^)]*)\)/
+              );
+
+            if (match) {
+              cancellationArgs =
+                match[1];
+            }
+          }
+
+          if (
+            room ||
+            board ||
+            perRoomRate ||
+            total
+          ) {
+            rates.push({
+              room,
+              inclusion,
+              board,
+              perRoomRate,
+              total,
+              cancellationArgs
+            });
+          }
+        }
+
+        /*
+         * Remove duplicate rows.
+         */
+        const uniqueRates = [];
+        const seen = new Set();
+
+        for (const rate of rates) {
+          const key =
+            JSON.stringify(rate);
+
+          if (!seen.has(key)) {
+            seen.add(key);
+            uniqueRates.push(rate);
+          }
+        }
+
+        if (!uniqueRates.length) {
+          throw new Error(
+            "RezLive Room Availability opened but no priced room rates were extracted | MODAL=" +
+            clean(
+              modal.innerText || ""
+            ).slice(0, 12000)
+          );
+        }
+
+        return {
+          hotelId,
+          roomId,
+          filepostfix,
+          rates: uniqueRates
+        };
+      },
+      {
+        hotelId,
+        roomId,
+        filepostfix
+      }
+    );
+
+    return {
+      ok: true,
+      ...result
+    };
+
+  } finally {
+    if (browser && browser.isConnected()) {
+      await browser.close().catch(() => {});
+    }
+  }
+}
+
+async function getRezLiveCancellationPolicy(details) {
+  const policyId = String(details?.policyId || "").trim();
+  const roomId = String(details?.roomId || "0").trim();
+  const searchId = String(details?.searchId || "").trim();
+
+  if (!policyId) {
+    throw new Error("Cancellation policy ID is missing");
+  }
+
+  if (!rezliveSession.hasRezLiveSession()) {
+    throw new Error("RezLive Chrome session is not available");
+  }
+
+  let browser = null;
+
+  try {
+    browser = await chromium.connectOverCDP(
+      rezliveSession.readDevToolsEndpoint()
+    );
+
+    const context = browser.contexts()[0];
+
+    if (!context) {
+      throw new Error("RezLive Chrome context not found");
+    }
+
+    const pages = context.pages();
+
+    const page = pages.find(p => {
+      try {
+        return /rezlive\.com/i.test(new URL(p.url()).hostname);
+      } catch {
+        return false;
+      }
+    });
+
+    if (!page) {
+      throw new Error("RezLive tab not found");
+    }
+
+    const result = await page.evaluate(
+      async ({ policyId, roomId, searchId }) => {
+
+        const url =
+          "/agency/hotel/action/cancellationPolicy" +
+          "/code/" + encodeURIComponent(policyId) +
+          "/roomid/" + encodeURIComponent(roomId) +
+          "/markup/0" +
+          "/searchid/" + encodeURIComponent(searchId) +
+          "/is_from_breakup/0";
+
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          credentials: "include"
+        });
+
+        if (!response.ok) {
+          throw new Error(
+            "Cancellation policy request failed: HTTP " +
+            response.status
+          );
+        }
+
+        const html = await response.text();
+
+        return {
+          ok: true,
+          html
+        };
+      },
+      {
+        policyId,
+        roomId,
+        searchId
+      }
+    );
+
+    return result;
+
+  } finally {
+    if (browser && browser.isConnected()) {
+      await browser.close().catch(() => {});
+    }
+  }
+}
 async function searchBrowserSource(source,search){
   const cfg=source.browser_config||{};if(!source.login_url||!source.site_username||!source.site_password_enc)return{configured:false,results:[],error:null};
   let password;try{password=decrypt(source.site_password_enc);}catch(e){return{configured:true,results:[],error:`Credential decryption failed: ${e.message}`};}
@@ -3233,10 +4288,923 @@ async function searchBrowserSource(source,search){
     );
     if(cfg.preset==='rezlive'&&rezliveSession.hasRezLiveSession()){
       browser=await chromium.connectOverCDP(rezliveSession.readDevToolsEndpoint());
-      rezliveCdpConnected=true;context=browser.contexts()[0];if(!context)throw new Error('RezLive Chrome context not found');const pages=context.pages();console.log("REZLIVE CHROME PAGES:");for(let i=0;i<pages.length;i++){try{console.log(`  PAGE ${i}: ${pages[i].url()}`)}catch(e){console.log(`  PAGE ${i}: <url-error>`)}}let page=pages.find(p=>{try{return /^https?:\/\/([^/]+\.)?rezlive\.com/i.test(p.url())}catch(e){return false}});if(!page){page=pages.find(p=>{try{return /rezlive\.com/i.test(new URL(p.url()).hostname)}catch(e){return false}})}if(!page){console.log("REZLIVE: no existing RezLive tab found; creating fresh tab.");page=await context.newPage();await page.goto("https://www.rezlive.com/common/index",{waitUntil:"domcontentloaded",timeout:30000})}console.log("REZLIVE SELECTED PAGE:",page.url());page.setDefaultTimeout(Math.max(Number(cfg.timeout_ms)||12000,60000));const rezSearch={...search}; const rows=await searchRezLive(page,rezSearch,{...cfg,_authenticated:true});return{configured:true,results:rows.map((r,i)=>({id:`${source.id}-${i}`,supplier:source.name,hotel:r.hotel||'Hotel',room:r.room||'',view:r.view||'',board:r.board||search.board||'',cancellation:r.cancellation||'',price:Number.isFinite(r.price)?r.price:number(r.price),currency:r.currency||cfg.default_currency||'',availability:r.availability||'',raw:r.raw||r})).filter(r=>Number.isFinite(r.price)&&r.price>0),error:null};
+      rezliveCdpConnected=true;context=browser.contexts()[0];if(!context)throw new Error('RezLive Chrome context not found');const pages=context.pages();console.log("REZLIVE CHROME PAGES:");for(let i=0;i<pages.length;i++){try{console.log(`  PAGE ${i}: ${pages[i].url()}`)}catch(e){console.log(`  PAGE ${i}: <url-error>`)}}let page=pages.find(p=>{try{return /^https?:\/\/([^/]+\.)?rezlive\.com/i.test(p.url())}catch(e){return false}});if(!page){page=pages.find(p=>{try{return /rezlive\.com/i.test(new URL(p.url()).hostname)}catch(e){return false}})}if(!page){console.log("REZLIVE: no existing RezLive tab found; creating fresh tab.");page=await context.newPage();await page.goto("https://www.rezlive.com/common/index",{waitUntil:"domcontentloaded",timeout:30000})}console.log("REZLIVE SELECTED PAGE:",page.url());page.setDefaultTimeout(Math.max(Number(cfg.timeout_ms)||12000,60000));const rezSearch={...search}; const rows=await searchRezLive(page,rezSearch,{...cfg,_authenticated:true});return{configured:true,results:rows.map((r,i)=>({id:`${source.id}-${i}`,supplier:source.name,hotel:r.hotel||'Hotel',room:r.room||'',view:r.view||'',board:r.board||search.board||'',cancellation:r.cancellation||'',price:Number.isFinite(r.price)?r.price:number(r.price),currency:r.currency||cfg.default_currency||'',availability:r.availability||'',raw:{...(r.raw||r),rezliveDetailsMeta:r.rezliveDetailsMeta||r.raw?.rezliveDetailsMeta||null}})).filter(r=>Number.isFinite(r.price)&&r.price>0),error:null};
+    }
+    if(cfg.preset==='book4trip'){
+      console.log("========================================================");
+      console.log("BOOK4TRIP DEDICATED SEARCH");
+      console.log("========================================================");
+
+      try {
+
+        page.setDefaultTimeout(
+          Math.max(Number(cfg.timeout_ms)||15000,30000)
+        );
+
+        console.log("BOOK4TRIP LOGIN PAGE:", page.url());
+
+        /*
+         * Book4Trip Agent login fields verified from the actual portal:
+         * #txt_username
+         * #txt_password
+         * agent_login_frm
+         * submit_login_form(...)
+         */
+
+        const usernameInput = page.locator("#txt_username").first();
+        const passwordInput = page.locator("#txt_password").first();
+
+        if (!(await usernameInput.count())) {
+          throw new Error(
+            "Book4Trip #txt_username was not found."
+          );
+        }
+
+        if (!(await passwordInput.count())) {
+          throw new Error(
+            "Book4Trip #txt_password was not found."
+          );
+        }
+
+        await usernameInput.fill(
+          String(source.site_username || "")
+        );
+
+        await passwordInput.fill(
+          String(password || "")
+        );
+
+        console.log("BOOK4TRIP LOGIN: credentials entered.");
+
+        const loginButton = page.locator(
+          'input[name="save"][value="Sign In"]'
+        ).first();
+
+        if (!(await loginButton.count())) {
+          throw new Error(
+            "Book4Trip Agent Sign In button was not found."
+          );
+        }
+
+        await Promise.allSettled([
+          page.waitForLoadState(
+            "domcontentloaded",
+            {timeout:30000}
+          ),
+          loginButton.click()
+        ]);
+
+        await page.waitForTimeout(
+          Number(cfg.post_login_wait_ms)||3000
+        );
+
+        console.log(
+          "BOOK4TRIP AFTER LOGIN:",
+          page.url()
+        );
+
+        /*
+         * Make sure we are not still sitting on the login form.
+         */
+        const stillLogin = await page.locator(
+          "#txt_username"
+        ).count().catch(()=>0);
+
+        if (stillLogin) {
+
+          const loginText =
+            String(
+              await page.locator("body").innerText()
+                .catch(()=>"")
+            )
+            .replace(/\s+/g," ")
+            .trim();
+
+          if (
+            /invalid|incorrect|wrong password|login failed|authentication failed/i
+              .test(loginText)
+          ) {
+            throw new Error(
+              "Book4Trip login appears to have failed."
+            );
+          }
+
+          console.log(
+            "BOOK4TRIP: login form still detected; continuing to inspect page."
+          );
+        }
+
+        /*
+         * Book4Trip hotel search form.
+         */
+        const destination = String(
+          search.destination || ""
+        ).trim();
+
+        if (!destination) {
+          throw new Error(
+            "Book4Trip destination is empty."
+          );
+        }
+
+        const destinationInput =
+          page.locator("#txt_other_hotel_city").first();
+
+        if (!(await destinationInput.count())) {
+          throw new Error(
+            "Book4Trip #txt_other_hotel_city was not found."
+          );
+        }
+
+        await destinationInput.fill(destination);
+
+        /*
+         * Trigger the site's jQuery autocomplete.
+         */
+        await destinationInput.press("ArrowDown").catch(()=>{});
+
+        await page.waitForTimeout(1500);
+
+        const suggestions = page.locator(
+          "ul.ui-autocomplete:visible li"
+        );
+
+        const suggestionCount =
+          await suggestions.count().catch(()=>0);
+
+        console.log(
+          "BOOK4TRIP DESTINATION SUGGESTIONS:",
+          suggestionCount
+        );
+
+        if (suggestionCount > 0) {
+
+          let clicked = false;
+
+          for(
+            let i=0;
+            i<Math.min(suggestionCount,20);
+            i++
+          ){
+
+            const item = suggestions.nth(i);
+
+            const text =
+              String(
+                await item.innerText().catch(()=>"")
+              )
+              .replace(/\s+/g," ")
+              .trim();
+
+            console.log(
+              "BOOK4TRIP SUGGESTION",
+              i,
+              ":",
+              text
+            );
+
+            if (
+              !clicked &&
+              (
+                text.toLowerCase().includes(
+                  destination.toLowerCase()
+                ) ||
+                /makkah|mecca|madinah|medina/i.test(text) &&
+                /saudi/i.test(destination)
+              )
+            ){
+
+              await item.click();
+              clicked = true;
+
+              console.log(
+                "BOOK4TRIP DESTINATION SELECTED:",
+                text
+              );
+            }
+          }
+
+          if(!clicked){
+            await suggestions.first().click();
+
+            console.log(
+              "BOOK4TRIP: selected first autocomplete suggestion."
+            );
+          }
+
+        } else {
+
+          /*
+           * Sometimes the autocomplete popup is not exposed as
+           * a visible jQuery UI list. Trigger the search event and
+           * inspect the resulting hidden fields.
+           */
+          await destinationInput.press("ArrowDown").catch(()=>{});
+          await destinationInput.press("Enter").catch(()=>{});
+          await page.waitForTimeout(500);
+
+        }
+
+        /*
+         * Read the values that the Book4Trip autocomplete is
+         * supposed to populate.
+         */
+        let destinationState =
+          await page.evaluate(() => {
+
+            const value = id =>
+              document.querySelector(id)?.value || "";
+
+            return {
+              destination:
+                value("#txt_other_hotel_city"),
+
+              hotelid:
+                value("#hotelid"),
+
+              keyword:
+                value("#keyword"),
+
+              city_code:
+                value("#city_code"),
+
+              other_city:
+                value("#other_city"),
+
+              sel_hotel:
+                value("#sel_hotel")
+            };
+
+          });
+
+        console.log(
+          "BOOK4TRIP DESTINATION STATE:",
+          JSON.stringify(
+            destinationState,
+            null,
+            2
+          )
+        );
+
+        if(
+          !destinationState.city_code &&
+          !destinationState.hotelid &&
+          !destinationState.other_city
+        ){
+
+          /*
+           * Try one more real autocomplete cycle.
+           */
+          await destinationInput.fill(
+            destination
+          );
+
+          await destinationInput.press(
+            "ArrowDown"
+          ).catch(()=>{});
+
+          await page.waitForTimeout(1000);
+
+          await destinationInput.press(
+            "Enter"
+          ).catch(()=>{});
+
+          await page.waitForTimeout(500);
+
+          destinationState =
+            await page.evaluate(() => {
+
+              const value = id =>
+                document.querySelector(id)?.value || "";
+
+              return {
+                destination:
+                  value("#txt_other_hotel_city"),
+
+                hotelid:
+                  value("#hotelid"),
+
+                keyword:
+                  value("#keyword"),
+
+                city_code:
+                  value("#city_code"),
+
+                other_city:
+                  value("#other_city"),
+
+                sel_hotel:
+                  value("#sel_hotel")
+              };
+
+            });
+
+          console.log(
+            "BOOK4TRIP DESTINATION STATE RETRY:",
+            JSON.stringify(
+              destinationState,
+              null,
+              2
+            )
+          );
+        }
+
+        if(
+          !destinationState.city_code &&
+          !destinationState.hotelid &&
+          !destinationState.other_city
+        ){
+          throw new Error(
+            "Book4Trip destination autocomplete did not populate city/hotel fields."
+          );
+        }
+
+        /*
+         * Dates.
+         *
+         * Book4Trip uses dd/mm/yyyy in its visible fields.
+         */
+        const formatBook4TripDate = value => {
+
+          const s = String(value || "").trim();
+
+          if(
+            /^\d{2}\/\d{2}\/\d{4}$/.test(s)
+          ){
+            return s;
+          }
+
+          const m = s.match(
+            /^(\d{4})-(\d{2})-(\d{2})$/
+          );
+
+          if(m){
+            return `${m[3]}/${m[2]}/${m[1]}`;
+          }
+
+          return s;
+        };
+
+        const checkin =
+          formatBook4TripDate(
+            search.checkin
+          );
+
+        const checkout =
+          formatBook4TripDate(
+            search.checkout
+          );
+
+        console.log(
+          "BOOK4TRIP DATES:",
+          checkin,
+          "->",
+          checkout
+        );
+
+        const dateFrom =
+          page.locator("#date_from").first();
+
+        const dateTo =
+          page.locator("#date_to").first();
+
+        if(!(await dateFrom.count())){
+          throw new Error(
+            "Book4Trip #date_from was not found."
+          );
+        }
+
+        if(!(await dateTo.count())){
+          throw new Error(
+            "Book4Trip #date_to was not found."
+          );
+        }
+
+        await dateFrom.fill(checkin);
+
+        await dateTo.fill(checkout);
+
+        await dateFrom.press("Tab").catch(()=>{});
+        await dateTo.press("Tab").catch(()=>{});
+
+        /*
+         * Nights.
+         */
+        const nights =
+          Math.max(
+            1,
+            Math.round(
+              (
+                new Date(
+                  String(search.checkout)
+                ).getTime() -
+                new Date(
+                  String(search.checkin)
+                ).getTime()
+              ) /
+              86400000
+            )
+          );
+
+        await page.locator("#sel_days")
+          .fill(String(nights))
+          .catch(()=>{});
+
+        /*
+         * Rooms/guests.
+         *
+         * The Book4Trip form stores room information in #roomarray.
+         * Preserve the site's JSON structure.
+         */
+        const rooms =
+          Math.max(
+            1,
+            Number(search.rooms)||1
+          );
+
+        const guests =
+          Math.max(
+            1,
+            Number(search.guests)||2
+          );
+
+        const roomArray =
+          Array.from(
+            {length:rooms},
+            () => ({
+              numberofAdults:String(guests),
+              noOfChildren:"0",
+              childrenages:"0,0"
+            })
+          );
+
+        await page.locator("#roomarray")
+          .fill(
+            JSON.stringify(roomArray)
+          )
+          .catch(()=>{});
+
+        /*
+         * Select the requested number of rooms if the portal's
+         * visible rooms control is available.
+         */
+        const selectRooms =
+          page.locator("#selectRooms").first();
+
+        if(await selectRooms.count()){
+
+          const options =
+            await selectRooms.locator("option").all();
+
+          let selectedValue = null;
+
+          for(const option of options){
+
+            const value =
+              await option.getAttribute("value");
+
+            const text =
+              String(
+                await option.innerText().catch(()=> "")
+              );
+
+            const numeric =
+              Number(
+                String(text)
+                  .replace(/[^\d]/g,"")
+              );
+
+            if(
+              numeric === rooms ||
+              String(value) === String(rooms)
+            ){
+              selectedValue = value;
+              break;
+            }
+          }
+
+          if(selectedValue !== null){
+            await selectRooms
+              .selectOption(String(selectedValue))
+              .catch(()=>{});
+          }
+        }
+
+        /*
+         * Currency is kept AED so the existing frontend
+         * AED -> USD conversion handles the display.
+         */
+        await page.locator("#selected_currency")
+          .selectOption("AED")
+          .catch(()=>{});
+
+        /*
+         * Final Book4Trip form state before submitting.
+         */
+        const finalState =
+          await page.evaluate(() => {
+
+            const value = id =>
+              document.querySelector(id)?.value || "";
+
+            return {
+              destination:
+                value("#txt_other_hotel_city"),
+
+              hotelid:
+                value("#hotelid"),
+
+              keyword:
+                value("#keyword"),
+
+              city_code:
+                value("#city_code"),
+
+              other_city:
+                value("#other_city"),
+
+              date_from:
+                value("#date_from"),
+
+              date_to:
+                value("#date_to"),
+
+              sel_days:
+                value("#sel_days"),
+
+              roomarray:
+                value("#roomarray"),
+
+              selected_currency:
+                value("#selected_currency")
+            };
+
+          });
+
+        console.log(
+          "BOOK4TRIP FINAL FORM STATE:",
+          JSON.stringify(
+            finalState,
+            null,
+            2
+          )
+        );
+
+        if(
+          !finalState.destination ||
+          (
+            !finalState.city_code &&
+            !finalState.hotelid &&
+            !finalState.other_city
+          )
+        ){
+          throw new Error(
+            "Book4Trip final destination state is incomplete."
+          );
+        }
+
+        if(
+          !finalState.date_from ||
+          !finalState.date_to
+        ){
+          throw new Error(
+            "Book4Trip final dates are incomplete."
+          );
+        }
+
+        /*
+         * Submit the real hotel_form.
+         */
+        const form =
+          page.locator("#hotel_form").first();
+
+        if(!(await form.count())){
+          throw new Error(
+            "Book4Trip #hotel_form was not found."
+          );
+        }
+
+        console.log(
+          "BOOK4TRIP: submitting hotel_form..."
+        );
+
+        await Promise.allSettled([
+          page.waitForLoadState(
+            "domcontentloaded",
+            {timeout:30000}
+          ),
+          form.evaluate(
+            f => f.submit()
+          )
+        ]);
+
+        await page.waitForTimeout(5000);
+
+        console.log(
+          "BOOK4TRIP RESULT URL:",
+          page.url()
+        );
+
+        /*
+         * Give Angular/listing code time to render.
+         */
+        const resultStarted = Date.now();
+
+        while(
+          Date.now() - resultStarted < 120000
+        ){
+
+          const count =
+            await page.locator(
+              ".hotel_listBox"
+            ).count().catch(()=>0);
+
+          const bodyText =
+            String(
+              await page.locator("body")
+                .innerText()
+                .catch(()=>"")
+            );
+
+          if(
+            count > 0 ||
+            /starts from|choose your room|available/i
+              .test(bodyText)
+          ){
+            break;
+          }
+
+          await page.waitForTimeout(1500);
+        }
+
+        /*
+         * Extract Book4Trip hotel cards directly from
+         * the real listing DOM.
+         */
+        const extracted =
+          await page.evaluate(() => {
+
+            const clean = value =>
+              String(value || "")
+                .replace(/\s+/g," ")
+                .trim();
+
+            const numberFrom = value => {
+
+              const m =
+                clean(value)
+                  .replace(/,/g,"")
+                  .match(
+                    /(\d+(?:\.\d+)?)/
+                  );
+
+              return m
+                ? Number(m[1])
+                : NaN;
+            };
+
+            const cards =
+              Array.from(
+                document.querySelectorAll(
+                  ".hotel_listBox"
+                )
+              );
+
+            return cards.map(
+              (card,index) => {
+
+                const hotel =
+                  clean(
+                    card.querySelector(
+                      ".htlNameCmpt"
+                    )?.textContent
+                  );
+
+                const address =
+                  clean(
+                    card.querySelector(
+                      ".lcn_name"
+                    )?.textContent
+                  );
+
+                const priceText =
+                  clean(
+                    card.querySelector(
+                      ".rslt_prce h2"
+                    )?.textContent
+                  );
+
+                const price =
+                  numberFrom(
+                    priceText
+                  );
+
+                const availability =
+                  clean(
+                    card.querySelector(
+                      ".available_txt"
+                    )?.textContent
+                  );
+
+                const stars =
+                  card.querySelectorAll(
+                    ".star_ratng .star_icn"
+                  ).length;
+
+                const chooseRoom =
+                  card.querySelector(
+                    ".chooseRoomBtn a"
+                  );
+
+                const details =
+                  card.querySelector(
+                    'a[href*="details.php?service=hotel"]'
+                  );
+
+                return {
+                  index,
+
+                  hotel,
+
+                  address,
+
+                  stars,
+
+                  price,
+
+                  currency:"AED",
+
+                  availability:
+                    availability || "Available",
+
+                  chooseRoomData:
+                    chooseRoom?.getAttribute(
+                      "data-val"
+                    ) || "",
+
+                  detailsUrl:
+                    details?.href || "",
+
+                  rawText:
+                    clean(card.innerText)
+                };
+
+              }
+            ).filter(
+              row =>
+                row.hotel &&
+                Number.isFinite(row.price) &&
+                row.price > 0
+            );
+
+          });
+
+        console.log(
+          "BOOK4TRIP EXTRACTED RESULTS:",
+          extracted.length
+        );
+
+        if(extracted.length){
+
+          console.log(
+            "BOOK4TRIP FIRST RESULT:",
+            JSON.stringify(
+              extracted[0],
+              null,
+              2
+            )
+          );
+
+        }else{
+
+          const body =
+            String(
+              await page.locator("body")
+                .innerText()
+                .catch(()=>"")
+            )
+            .replace(/\s+/g," ")
+            .slice(0,5000);
+
+          console.log(
+            "BOOK4TRIP RESULT PAGE TEXT:",
+            body
+          );
+
+          throw new Error(
+            "Book4Trip search completed but no priced hotel cards were extracted."
+          );
+        }
+
+        return {
+          configured:true,
+
+          results:extracted.map(
+            (r,i) => ({
+              id:
+                `${source.id}-${i}`,
+
+              supplier:
+                source.name,
+
+              hotel:
+                r.hotel,
+
+              room:"",
+
+              view:
+                r.address || "",
+
+              board:
+                search.board || "",
+
+              cancellation:"",
+
+              price:
+                Number(r.price),
+
+              currency:"AED",
+
+              availability:
+                r.availability,
+
+              raw:{
+                ...r,
+                book4trip:true
+              }
+            })
+          ),
+
+          error:null
+        };
+
+      }catch(e){
+
+        console.error(
+          "BOOK4TRIP SEARCH ERROR:",
+          e?.message || e
+        );
+
+        return {
+          configured:true,
+          results:[],
+          error:e?.message || String(e)
+        };
+      }
+    }
+    if(cfg.preset==='locanda'){
+      try{
+        const result=await locandaBrowser.searchLocanda(search,{
+          timeout_ms:Math.max(Number(cfg.timeout_ms)||30000,30000)
+        });
+
+        const hotels=Array.isArray(result?.hotels)
+          ? result.hotels
+          : [];
+
+        const results=hotels.map((r,i)=>({
+          id:`${source.id}-${i}`,
+          supplier:source.name,
+          hotel:r.hotel||'Hotel',
+          room:'',
+          view:r.view||r.availability||'',
+          board:'',
+          cancellation:'',
+          price:0,
+          currency:'',
+          availability:r.availability||r.view||'',
+          raw:{
+            ...(r.raw||r),
+            locanda:true
+          }
+        }));
+
+        console.log(
+          'LOCANDA: initial hotel search complete:',
+          results.length
+        );
+
+        return{
+          configured:true,
+          results,
+          error:null
+        };
+
+      }catch(e){
+        console.error(
+          'LOCANDA SEARCH ERROR:',
+          e.message
+        );
+
+        return{
+          configured:true,
+          results:[],
+          error:e.message
+        };
+      }
     }
     browser=await chromium.launch({headless:true});context=await browser.newContext({viewport:{width:1440,height:1000}});const page=await context.newPage();page.setDefaultTimeout(Number(cfg.timeout_ms)||12000);await page.goto(source.login_url,{waitUntil:'domcontentloaded',timeout:30000});
-    if(cfg.preset==='rezlive'){const rows=await searchRezLive(page,search,{...cfg,_username:source.site_username,_password:password});return{configured:true,results:rows.map((r,i)=>({id:`${source.id}-${i}`,supplier:source.name,hotel:r.hotel||'Hotel',room:r.room||'',view:r.view||'',board:r.board||search.board||'',cancellation:r.cancellation||'',price:Number.isFinite(r.price)?r.price:number(r.price),currency:r.currency||cfg.default_currency||'',availability:r.availability||'',raw:r.raw||r})).filter(r=>Number.isFinite(r.price)&&r.price>0),error:null};}
+    if(cfg.preset==='rezlive'){const rows=await searchRezLive(page,search,{...cfg,_username:source.site_username,_password:password});return{configured:true,results:rows.map((r,i)=>({id:`${source.id}-${i}`,supplier:source.name,hotel:r.hotel||'Hotel',room:r.room||'',view:r.view||'',board:r.board||search.board||'',cancellation:r.cancellation||'',price:Number.isFinite(r.price)?r.price:number(r.price),currency:r.currency||cfg.default_currency||'',availability:r.availability||'',raw:{...(r.raw||r),rezliveDetailsMeta:r.rezliveDetailsMeta||r.raw?.rezliveDetailsMeta||null}})).filter(r=>Number.isFinite(r.price)&&r.price>0),error:null};}
     await loginGeneric(page,source,cfg,password);await navigateGenericSearch(page,search,cfg);
     if(cfg.results_wait_for_selector){
   const loc=await firstVisibleAnyFrame(page,[cfg.results_wait_for_selector]);
@@ -3298,7 +5266,7 @@ async function searchBrowserSource(source,search){
 }
     const blocked=await blockedReason(page);if(blocked)throw new Error(blocked);
     let rows=[];for(const frame of await allFrames(page))rows.push(...await extractRatesFromFrame(frame,cfg));const seen=new Set();rows=rows.filter(r=>{const p=Number(r.price);if(!Number.isFinite(p)||p<=0)return false;const k=`${r.hotel}|${r.room}|${r.board}|${p}|${r.currency}`;if(seen.has(k))return false;seen.add(k);return true;}).slice(0,Number(cfg.max_results)||500);
-    const results=rows.map((r,i)=>({id:`${source.id}-${i}`,supplier:source.name,hotel:r.hotel||'Hotel',room:r.room||'',view:r.view||'',board:r.board||search.board||'',cancellation:r.cancellation||'',price:Number(r.price),currency:r.currency||cfg.default_currency||'',availability:r.availability||'',raw:r.raw||r}));
+    const results=rows.map((r,i)=>({id:`${source.id}-${i}`,supplier:source.name,hotel:r.hotel||'Hotel',room:r.room||'',view:r.view||'',board:r.board||search.board||'',cancellation:r.cancellation||'',price:Number(r.price),currency:r.currency||cfg.default_currency||'',availability:r.availability||'',raw:{...(r.raw||r),rezliveDetailsMeta:r.rezliveDetailsMeta||r.raw?.rezliveDetailsMeta||null}}));
     if(!results.length)return{configured:true,results:[],error:'Supplier login/search completed but no priced rates were extracted'};
     return{configured:true,results,error:null};
   }catch(e){
@@ -3334,4 +5302,24 @@ async function searchBrowserSource(source,search){
 }
 }
 
-module.exports={searchBrowserSource,fillTemplate};
+module.exports={searchBrowserSource,fillTemplate,getRezLiveHotelDetails,getRezLiveCancellationPolicy};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
