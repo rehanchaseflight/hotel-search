@@ -12,7 +12,6 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.0.1",
     "bcryptjs": "^2.4.3",
     "countrycitystatejson": "^26.8.1603",
     "dotenv": "^16.4.5",
