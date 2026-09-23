@@ -1,13 +1,12 @@
-﻿const { Client } = require('pg');
+﻿const { Pool } = require('pg');
 
-let client;
-let connecting;
+let pool;
 
 function getEnv() {
   return globalThis.__WORKER_ENV || process.env;
 }
 
-function getClient() {
+function getPool() {
   const env = getEnv();
   const url = env.DATABASE_URL;
 
@@ -19,38 +18,26 @@ function getClient() {
     throw new Error('DATABASE_URL is invalid.');
   }
 
-  if (!client) {
-    client = new Client({
+  if (!pool) {
+    pool = new Pool({
       connectionString: url.trim(),
-      ssl: { rejectUnauthorized: false }
+      ssl: { rejectUnauthorized: false },
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000
+    });
+
+    pool.on('error', err => {
+      console.error('DATABASE POOL ERROR:', err.message);
     });
   }
 
-  return client;
-}
-
-async function connect() {
-  const c = getClient();
-
-  if (c._connected) return c;
-
-  if (!connecting) {
-    connecting = c.connect()
-      .then(() => {
-        c._connected = true;
-        return c;
-      })
-      .finally(() => {
-        connecting = null;
-      });
-  }
-
-  return connecting;
+  return pool;
 }
 
 async function query(text, params = []) {
-  const c = await connect();
-  const result = await c.query(text, params);
+  const p = getPool();
+  const result = await p.query(text, params);
   return { rows: result.rows };
 }
 
@@ -133,4 +120,14 @@ async function init() {
     ON comparisons(search_id, price)`);
 }
 
-module.exports = { query, init };
+module.exports = {
+  query,
+  init,
+  pool: new Proxy({}, {
+    get(_target, property) {
+      const p = getPool();
+      const value = p[property];
+      return typeof value === 'function' ? value.bind(p) : value;
+    }
+  })
+};
