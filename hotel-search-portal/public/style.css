@@ -725,6 +725,27 @@ td {
     margin-bottom: 5px;
   }
 }
+
+/* FLOATING SEARCH FAILED STATE */
+#floating-search-progress .floating-search-row.failed {
+  opacity: .95;
+}
+
+#floating-search-progress .floating-search-spinner.failed {
+  color: #b42318;
+  border-color: #f1b4ad;
+  background: #fff1f0;
+  animation: none;
+}
+
+#floating-search-progress .floating-search-row.failed .floating-search-state {
+  color: #b42318;
+  font-weight: 700;
+}
+
+#floating-search-progress .floating-search-row.failed .floating-search-time {
+  color: #b42318;
+}
 /* FLOATING SEARCH COMPLETED STATE */
 
 #floating-search-progress .floating-search-row.completed {
@@ -1115,3 +1136,5 @@ td {
     }
   }
 }
+
+

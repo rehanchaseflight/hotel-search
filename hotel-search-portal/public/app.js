@@ -2542,21 +2542,89 @@ function stopFloatingSearchProgress(finalData=null){
     resultCount.textContent=String(total);
   }
 
+
+  const finalStatuses =
+    finalData && Array.isArray(finalData.connectorStatuses)
+      ? finalData.connectorStatuses
+      : [];
+
+  const statusMap = new Map(
+    finalStatuses.map(s=>[
+      String(s.id),
+      s
+    ])
+  );
+
+  let completedCount=0;
+  let failedCount=0;
+
   box.querySelectorAll('.floating-search-row').forEach(row=>{
-    row.classList.add('completed');
+    const supplierId=String(row.dataset.supplierId || '');
+    const supplierStatus=statusMap.get(supplierId);
 
     const spinner=row.querySelector('.floating-search-spinner');
     const state=row.querySelector('.floating-search-state');
 
-    if(spinner){
-      spinner.textContent='✓';
-      spinner.classList.add('completed');
-    }
+    row.classList.remove('completed','failed');
 
-    if(state){
-      state.textContent='Completed';
+    const failed=!!(
+      supplierStatus &&
+      (
+        supplierStatus.ok===false ||
+        supplierStatus.status==='offline' ||
+        supplierStatus.error
+      )
+    );
+
+    if(failed){
+      failedCount++;
+      row.classList.add('failed');
+
+      if(spinner){
+        spinner.textContent='✕';
+        spinner.classList.remove('completed');
+        spinner.classList.add('failed');
+      }
+
+      if(state){
+        state.textContent='Failed';
+        state.title=String(
+          supplierStatus.error || 'Unable to retrieve results.'
+        ).trim();
+      }
+    }else{
+      completedCount++;
+      row.classList.add('completed');
+
+      if(spinner){
+        spinner.textContent='✓';
+        spinner.classList.add('completed');
+        spinner.classList.remove('failed');
+      }
+
+      if(state){
+        state.textContent='Completed';
+        state.title='';
+      }
     }
   });
+
+  const footer=box.querySelector('.floating-search-footer');
+
+  if(footer){
+    const label=footer.querySelector('span');
+    const value=footer.querySelector('strong');
+
+    if(label){
+      label.textContent=failedCount
+        ? `${completedCount} completed • ${failedCount} failed`
+        : 'Suppliers completed';
+    }
+
+    if(value){
+      value.textContent=String(completedCount);
+    }
+  }
 
   const collapseButton=$('floating-search-collapse');
 
@@ -2584,6 +2652,9 @@ function stopFloatingSearchProgress(finalData=null){
 
 // Restore authenticated session after page refresh.
 (async()=>{try{const me=await api('/api/auth/me');$('who').textContent=me.username;hide('login-view');show('app-view');applyRole(me.role);await loadSources();loadSupplierHealth()}catch{}})();
+
+
+
 
 
 

@@ -25,3 +25,10 @@ trace-*.txt
 *-diagnostic.sql
 rezlive-debug-rows.json
 *.png
+
+neon-backup.json
+_book4trip-*
+_backup-*
+.book4trip-*
+*.session
+
