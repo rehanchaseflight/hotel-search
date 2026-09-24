@@ -1606,12 +1606,104 @@ try {
       }
     );
 
+    const pricedHotels = [];
+
+    for (let i = 0; i < hotels.length; i++) {
+      const hotel = hotels[i];
+
+      if (!hotel.availability) {
+        continue;
+      }
+
+      try {
+        console.log(
+          "LOCANDA RATES:",
+          `${i + 1}/${hotels.length}`,
+          hotel.hotel
+        );
+
+        const rateData = await getLocandaRates(
+          hotel.availability,
+          {
+            hotel: hotel.hotel,
+            browser,
+            page
+          }
+        );
+
+        const rates = Array.isArray(rateData?.rates)
+          ? rateData.rates
+          : [];
+
+        const validRates = rates
+          .map(rate => ({
+            rate,
+            amount: Number.parseFloat(
+              String(rate?.amount || "").replace(/,/g, "")
+            )
+          }))
+          .filter(item => Number.isFinite(item.amount) && item.amount > 0);
+
+        if (validRates.length === 0) {
+          continue;
+        }
+
+        validRates.sort((a, b) => a.amount - b.amount);
+
+        const lowest = validRates[0];
+        const rate = lowest.rate;
+
+        pricedHotels.push({
+          id: hotel.id,
+          supplier: "Locanda",
+          hotel: hotel.hotel || "",
+          room: "",
+          view: "View Rates",
+          board: "",
+          cancellation: "",
+          price: lowest.amount,
+          currency: rate.currency || "USD",
+          availability: "Available",
+          supplierRoomCode: rate.roomId || "",
+          rateFrom: "",
+          rateTo: "",
+          raw: {
+            hotelRowId: hotel.raw?.hotelRowId || "",
+            availability: hotel.availability,
+            lowestRate: {
+              roomId: rate.roomId || "",
+              amount: rate.amount || "",
+              room: rate.room || "",
+              meal: rate.meal || "",
+              currency: rate.currency || "",
+              cancellation: rate.cancellation || ""
+            },
+            rates
+          }
+        });
+      } catch (error) {
+        console.error(
+          "LOCANDA RATE ERROR:",
+          hotel.hotel,
+          error.message
+        );
+      }
+    }
+
+    console.log(
+      "LOCANDA: PRICED RESULTS:",
+      {
+        hotels: hotels.length,
+        pricedHotels: pricedHotels.length,
+        unpricedHotels: hotels.length - pricedHotels.length
+      }
+    );
+
     return {
       ok: true,
-      hotels,
+      hotels: pricedHotels,
       searchUrl: page.url()
     };
-
   } finally {
     /*
      * Keep the existing Chrome session alive.
@@ -1624,7 +1716,9 @@ async function getLocandaRates(
   availabilityUrl,
   options = {}
 ) {
-  const browser = await puppeteer.connect({
+  const ownsBrowser = !options.browser;
+
+  const browser = options.browser || await puppeteer.connect({
     browserWSEndpoint: readDevToolsEndpoint(),
     defaultViewport: null,
     handleDevToolsAsPage: true,
@@ -1633,8 +1727,8 @@ async function getLocandaRates(
 
   try {
     const page =
+      options.page ||
       await getLocandaPage(browser);
-
     page.setDefaultTimeout(30000);
 
     await page.goto(
@@ -1692,7 +1786,9 @@ async function getLocandaRates(
     };
 
   } finally {
-    browser.disconnect();
+    if (ownsBrowser) {
+      browser.disconnect();
+    }
   }
 }
 
@@ -1700,6 +1796,10 @@ module.exports = {
   searchLocanda,
   getLocandaRates
 };
+
+
+
+
 
 
 

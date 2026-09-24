@@ -1,4 +1,4 @@
-﻿const { decrypt } = require('../crypto-util');
+const { decrypt } = require('../crypto-util');
 /**
  * Book4Trip Hybrid HTTP Connector
  *
@@ -1150,14 +1150,16 @@ async function getListingHtml(sessionId) {
 
 function normalizeBook4TripItem(item, source, index, search) {
   const price =
-    Number(
-      item?.total_charges ??
-      item?.sort_total_charges ??
-      0
+    Number.parseFloat(
+      String(
+        item?.total_charges ??
+        item?.sort_total_charges ??
+        ''
+      ).replace(/,/g, '')
     );
-
   const available =
     Number(item?.propertyAvailable) === 1;
+
 
   return {
     id:
@@ -1176,10 +1178,7 @@ function normalizeBook4TripItem(item, source, index, search) {
 
     room: '',
 
-    view:
-      item?.address1 ||
-      item?.address ||
-      '',
+    view: 'View Rates',
 
     board:
       search?.board ||
@@ -1219,6 +1218,10 @@ function normalizeBook4TripItem(item, source, index, search) {
         item?.id ||
         item?._id?.$oid ||
         '',
+
+       sessionid:
+         item?.book4trip_sessionid ||
+         '',
 
       book4trip: true
     }
@@ -1472,6 +1475,8 @@ async function getBook4TripRoomRates(
 
   const responseText =
     await response.text();
+  require('fs').writeFileSync(require('path').join(process.cwd(), 'book4trip-room-rates-debug.html'), responseText, 'utf8');
+  log('BOOK4TRIP ROOM RATES DEBUG FILE SAVED');
 
   log(
     'BOOK4TRIP ROOM RATES RESPONSE:',
@@ -1506,7 +1511,7 @@ async function getBook4TripRoomRates(
 
   const rooms = [];
 
-  for (const group of data) {
+  for (const group of data.flat(Infinity)) {
     const rateInfo =
       group?.RateInfo ||
       group?.rateInfo ||
@@ -1655,7 +1660,8 @@ async function getBook4TripRoomRates(
 async function fetchAllPages(
   pages,
   source,
-  search
+  search,
+  sessionId,
 ) {
   const results = [];
 
@@ -1823,6 +1829,10 @@ async function fetchAllPages(
         book4trip_local_hotel_id:
           identifier?.local_hotel_id ||
           "",
+
+         book4trip_sessionid:
+           sessionId ||
+           '',
 
         book4trip_userid:
           identifier?.userid ||
@@ -2548,7 +2558,8 @@ async function searchBook4TripHttpSource(source, search) {
       await fetchAllPages(
         paginationPages,
         source,
-        search
+        search,
+        sessionId
       );
 
     log(
@@ -2663,9 +2674,12 @@ async function searchBook4TripHttpSource(source, search) {
   return results;
 }
 module.exports = {
+  getBook4TripRoomRates,
   searchBook4TripHttpSource,
   healthBook4TripHttpSource
 };
+
+
 
 
 

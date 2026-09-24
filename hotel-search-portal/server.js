@@ -1,4 +1,4 @@
-﻿if(!process.env.CLOUDFLARE)require('dotenv').config();
+if(!process.env.CLOUDFLARE)require('dotenv').config();
 const bcrypt=require('bcryptjs');const jwt=require('jsonwebtoken');const speakeasy=require('speakeasy');const db=require('./db');const {encrypt}=require('./crypto-util');const connectors=require('./connectors');const geo=require('countrycitystatejson');
 const JWT_SECRET=process.env.JWT_SECRET;if(!JWT_SECRET||JWT_SECRET.length<32)throw new Error('JWT_SECRET must be at least 32 characters');
 const loginAttempts=new Map();const BOARDS=['ROOM_ONLY','BED_AND_BREAKFAST','HALF_BOARD','FULL_BOARD','ALL_INCLUSIVE'];const jsonHeaders={'content-type':'application/json; charset=utf-8','cache-control':'no-store'};
@@ -118,6 +118,47 @@ if(path==='/api/supplier-health'&&method==='GET'){try{const r=await db.query("SE
  if(path.startsWith('/api/sources/')&&method==='PUT'){if(!allowed(staff.role,'SUPER_ADMIN','ADMIN'))return json({error:'Insufficient permissions'},403);const id=path.split('/').pop();try{const{name,login_url,site_username,site_password,agent_code,enabled,browser_config}=await body(req);const current=await db.query('SELECT * FROM sources WHERE id=$1',[id]);if(!current.rows[0])return json({error:'Supplier not found'},404);const s=current.rows[0];const passwordEnc=site_password?encrypt(String(site_password)):s.site_password_enc;await db.query('UPDATE sources SET name=$1,login_url=$2,site_username=$3,site_password_enc=$4,agent_code=$5,enabled=$6,browser_config=$7 WHERE id=$8',[String(name||s.name).slice(0,120),String(login_url||s.login_url),String(site_username ?? s.site_username ?? ''),passwordEnc,String(agent_code ?? s.agent_code ?? ''),enabled!==undefined?Boolean(enabled):s.enabled,JSON.stringify(browser_config||s.browser_config||{}) ,id]);return json({ok:true})}catch(e){console.error(e);return json({error:'Could not update supplier'},500)}}
  if(path==='/api/sources'&&method==='POST'){if(!allowed(staff.role,'SUPER_ADMIN','ADMIN'))return json({error:'Insufficient permissions'},403);try{const{name,login_url,deep_link_template,site_username,site_password,agent_code,connector_type='api',enabled=true,browser_config={}}=await body(req);if(!name||!login_url)return json({error:'Name and login URL are required'},400);try{new URL(login_url)}catch{return json({error:'Invalid login URL'},400)}if(!['api','browser','playwright','manual'].includes(connector_type))return json({error:'Invalid connector type'},400);if(connector_type==='browser'||connector_type==='playwright'){if(!site_username||!site_password)return json({error:'Browser connector requires username and password'},400);if(typeof browser_config!=='object'||Array.isArray(browser_config))return json({error:'browser_config must be an object'},400)}const r=await db.query('INSERT INTO sources(name,login_url,deep_link_template,site_username,site_password_enc,agent_code,connector_type,enabled,browser_config) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',[name.slice(0,120),login_url,deep_link_template||'',site_username||'',encrypt(site_password||''),agent_code||'',connector_type,Boolean(enabled),JSON.stringify(browser_config||{})]);return json({id:r.rows[0].id})}catch(e){console.error(e);return json({error:'Could not save source. Please check the source details and try again.'},500)}}
  if(path.startsWith('/api/sources/')&&method==='DELETE'){if(!allowed(staff.role,'SUPER_ADMIN','ADMIN'))return json({error:'Insufficient permissions'},403);await db.query('DELETE FROM sources WHERE id=$1',[path.split('/').pop()]);return json({ok:true})}
+  if(path==='/api/book4trip/rates'&&method==='POST'){
+   try{
+     const{roomRequest,search}=await body(req);
+
+     if(!roomRequest||typeof roomRequest!=='object'){
+       return json({ok:false,error:'Book4trip room request is required'},400);
+     }
+
+     const mongoId=String(roomRequest.mongo_id||roomRequest.mongoId||'').trim();
+     const sessionId=String(roomRequest.sessionid||roomRequest.sessionId||'').trim();
+
+     if(!mongoId||!sessionId){
+       return json({ok:false,error:'Book4trip room identifiers are missing'},400);
+     }
+
+     const sourceResult=await db.query(
+       "SELECT id,name FROM sources WHERE enabled=true AND LOWER(name) LIKE '%book4trip%' ORDER BY id LIMIT 1"
+     );
+
+     if(!sourceResult.rows[0]){
+       return json({ok:false,error:'Book4trip supplier is not enabled'},404);
+     }
+
+     const book4trip=require('./connectors/book4trip-http');
+
+     const result=await book4trip.getBook4TripRoomRates(
+       roomRequest,
+       sourceResult.rows[0],
+       search||{}
+     );
+
+     return json({ok:true,...result});
+
+   }catch(e){
+     console.error('BOOK4TRIP RATES ERROR:',e);
+     return json({
+       ok:false,
+       error:String(e&&e.message||e||'Book4trip rates failed')
+     },500);
+   }
+ }
  if(path==='/api/locanda/rates'&&method==='POST'){
   try{
     const{url,hotel}=await body(req);

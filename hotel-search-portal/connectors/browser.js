@@ -1,4 +1,4 @@
-﻿const { chromium } = require('playwright');
+const { chromium } = require('playwright');
 const { decrypt } = require('../crypto-util');
 const rezliveSession = require('./rezlive-session');
 const locandaBrowser = require('./locanda-browser-v1');
@@ -2756,9 +2756,9 @@ async function rezLiveListSignature() {
                  * Common RezLive/Bootstrap/jQuery next controls.
                  */
                 const nextText =
-                  /^(next|ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Âº|ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»|>|ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢)$/i.test(value) ||
-                  /^(next|ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Âº|ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»|>|ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢)$/i.test(aria) ||
-                  /^(next|ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Âº|ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â»|>|ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢)$/i.test(title);
+                  /^(next|ÃƒÂ¢Ã¢â€šÂ¬Ã‚Âº|Ãƒâ€šÃ‚Â»|>|ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢)$/i.test(value) ||
+                  /^(next|ÃƒÂ¢Ã¢â€šÂ¬Ã‚Âº|Ãƒâ€šÃ‚Â»|>|ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢)$/i.test(aria) ||
+                  /^(next|ÃƒÂ¢Ã¢â€šÂ¬Ã‚Âº|Ãƒâ€šÃ‚Â»|>|ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢)$/i.test(title);
 
                 const nextWord =
                   /\bnext\b/i.test(meta);
@@ -5166,13 +5166,14 @@ async function searchBrowserSource(source,search){
           id:`${source.id}-${i}`,
           supplier:source.name,
           hotel:r.hotel||'Hotel',
-          room:'',
+          room:r.room||r.raw?.lowestRate?.room||'',
           view:r.view||r.availability||'',
-          board:'',
-          cancellation:'',
-          price:0,
-          currency:'',
+          board:r.board||r.raw?.lowestRate?.meal||'',
+          cancellation:r.cancellation||r.raw?.lowestRate?.cancellation||'',
+          price:Number(r.price)||Number.parseFloat(String(r.raw?.lowestRate?.amount||'').replace(/,/g,''))||0,
+          currency:r.currency||r.raw?.lowestRate?.currency||'USD',
           availability:r.availability||r.view||'',
+           supplierRoomCode:r.supplierRoomCode||r.raw?.lowestRate?.roomId||'',
           raw:{
             ...(r.raw||r),
             locanda:true

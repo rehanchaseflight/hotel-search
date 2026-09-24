@@ -699,6 +699,67 @@ async function waitForAedUsdRate(){
     return null;
   }
 }
+function createBook4tripRateFilters(rooms, onChange){
+  const wrap=document.createElement('div');
+  wrap.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 16px;padding:10px;background:#f7f8fa;border:1px solid #e1e4e8;border-radius:8px';
+
+  const makeSelect=(label,values,allLabel)=>{
+    const group=document.createElement('div');
+    group.style.cssText='display:flex;align-items:center;gap:6px';
+
+    const text=document.createElement('span');
+    text.textContent=label;
+    text.style.cssText='font-weight:600;font-size:13px';
+
+    const select=document.createElement('select');
+    select.style.cssText='padding:6px 9px;border:1px solid #ccd1d7;border-radius:6px;background:#fff';
+
+    const all=document.createElement('option');
+    all.value='';
+    all.textContent=allLabel;
+    select.appendChild(all);
+
+    values.forEach(value=>{
+      const option=document.createElement('option');
+      option.value=value;
+      option.textContent=value;
+      select.appendChild(option);
+    });
+
+    select.addEventListener('change',onChange);
+
+    group.appendChild(text);
+    group.appendChild(select);
+    wrap.appendChild(group);
+
+    return select;
+  };
+
+  const meals=[...new Set(
+    rooms
+      .map(rate=>String(rate.board||rate.mealBasis||'').trim())
+      .filter(Boolean)
+  )];
+
+  const cancellations=[...new Set(
+    rooms
+      .map(rate=>String(rate.cancellation||'').trim())
+      .filter(Boolean)
+  )];
+
+  const mealSelect=makeSelect('Meals: ',meals,'All Meals');
+  const cancellationSelect=makeSelect('Cancellation: ',cancellations,'All Cancellation');
+
+  return {
+    element:wrap,
+    getValues:()=>{
+      return {
+        meal:String(mealSelect.value||'').trim().toLowerCase(),
+        cancellation:String(cancellationSelect.value||'').trim().toLowerCase()
+      };
+    }
+  };
+}
 function renderResults(results,statuses){
   renderSupplierStatus(statuses);
 
@@ -712,24 +773,15 @@ function renderResults(results,statuses){
     .map(r=>({
       ...r,
       hotel:String(r.hotel||'').trim(),
-      room:/locanda/i.test(String(r.supplier||r.source||r.source_name||'')) ? '' : String(r.room||'').trim(),
-      category:/locanda/i.test(String(r.supplier||r.source||r.source_name||'')) ? '' : cleanLocandaField(
-        r.category ??
-        r.hotel_category ??
-        r.hotelCategory ??
-        r.star_rating ??
-        r.stars ??
-        ''
-      ),
-      view:/locanda/i.test(String(r.supplier||r.source||r.source_name||'')) && String(r.availability||'').trim()
-        ? String(r.availability).trim()
-        : String(r.view||'').trim(),
-      board:/locanda/i.test(String(r.supplier||r.source||r.source_name||'')) ? '' : String(r.board||'').trim(),
-      cancellation:/locanda/i.test(String(r.supplier||r.source||r.source_name||'')) ? '' : String(r.cancellation||'').trim(),
+      room:String(r.room||'').trim(),
+      category:cleanLocandaField(r.category ?? r.hotel_category ?? r.hotelCategory ?? r.star_rating ?? r.stars ?? ''),
+      view:String(r.view||'').trim(),
+      board:String(r.board||'').trim(),
+      cancellation:String(r.cancellation||'').trim(),
       availability:String(r.availability||'Available').trim(),
       supplier:String(r.supplier||r.source||r.source_name||'Supplier').trim(),
-      currency:/locanda/i.test(String(r.supplier||r.source||r.source_name||'')) ? 'USD' : String(r.currency||'AED').trim(),
-      price:/locanda/i.test(String(r.supplier||r.source||r.source_name||'')) && (r.price==null || r.price==='' || Number(r.price)===0) ? null : (r.price==null||r.price===''?null:Number(r.price))
+      currency:String(r.currency||'AED').trim(),
+      price:(r.price==null||r.price===''?null:Number(r.price))
     }));
 
   const count=document.createElement('div');
@@ -868,8 +920,8 @@ function renderResults(results,statuses){
           addCell(tr,'—');
           addCell(tr,'—');
         }else{
-          addCell(tr,/locanda/i.test(String(r.supplier || r.source || "")) ? "" : r.room);
-          addCell(tr,/locanda/i.test(String(r.supplier || r.source || "")) ? "" : r.category);
+          addCell(tr,r.room);
+          addCell(tr,r.category);
         }
         /*
          * REZLIVE_DETAILS_UI_V1
@@ -894,7 +946,7 @@ function renderResults(results,statuses){
           const a=document.createElement('a');
 
           a.href='#';
-          a.textContent='View Rates';
+          a.textContent=/locanda/i.test(String(r.supplier || r.source || ''))?'View More Rooms':'View Rates';
           a.className='hotel-view-link';
 
           a.addEventListener('click',async(ev)=>{
@@ -1026,7 +1078,8 @@ function renderResults(results,statuses){
                 thead.appendChild(headRow);
                 table.appendChild(thead);
 
-                const tbody=document.createElement('tbody');
+                const tbody=document.createElement('tbody');        
+
 
                 rates.forEach(rate=>{
                   const row=document.createElement('tr');
@@ -1217,7 +1270,7 @@ function renderResults(results,statuses){
                 String(error&&error.message||error)
               );
             }finally{
-              a.textContent='View Rates';
+              a.textContent=/locanda/i.test(String(r.supplier || r.source || ''))?'View More Rooms':'View Rates';
               a.style.pointerEvents='';
             }
           });
@@ -1233,7 +1286,7 @@ function renderResults(results,statuses){
   const a=document.createElement('a');
 
   a.href='#';
-  a.textContent='View Rates';
+  a.textContent=/locanda/i.test(String(r.supplier || r.source || ''))?'View More Rooms':'View Rates';
   a.className='hotel-view-link';
 
   a.addEventListener('click',async(ev)=>{
@@ -1544,7 +1597,7 @@ function renderResults(results,statuses){
         String(error&&error.message||error)
       );
     }finally{
-      a.textContent='View Rates';
+      a.textContent=/locanda/i.test(String(r.supplier || r.source || ''))?'View More Rooms':'View Rates';
       a.style.pointerEvents='';
     }
   });
@@ -1552,13 +1605,7 @@ function renderResults(results,statuses){
   td.appendChild(a);
   tr.appendChild(td);
 
-}else{
-  const viewValue=String(r.view||r.url||'').trim();
-
-if(
-  /locanda/i.test(String(r.supplier||r.source||'')) &&
-  /^https?:\/\/app\.locandahub\.com\/agent\/booking\/availability\.php\?/i.test(viewValue)
-){
+}else if(/book4trip/i.test(String(r.supplier||r.source||'')) && r.raw?.book4trip === true && String(r.raw?.mongo_id||'').trim() && String(r.raw?.sessionid||'').trim()){
   const td=document.createElement('td');
   const a=document.createElement('a');
 
@@ -1570,7 +1617,203 @@ if(
     ev.preventDefault();
 
     const hotelName=String(r.hotel||'').trim();
-    const detailUrl=String(r.view||r.url||'').trim();
+
+    const roomRequest={
+      id:String(r.raw?.book4trip_row_id||r.id||0),
+      mongo_id:String(r.raw?.mongo_id||'').trim(),
+      local_hotel_id:String(r.raw?.local_hotel_id||'').trim(),
+      hotelId:String(r.raw?.hotelId||'').trim(),
+      sessionid:String(r.raw?.sessionid||'').trim(),
+      userid:String(r.raw?.book4trip_userid||'8666').trim()
+    };
+
+    a.textContent='Loading...';
+    a.style.pointerEvents='none';
+
+    try{
+
+      const response=await fetch('/api/book4trip/rates',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        credentials:'same-origin',
+        body:JSON.stringify({
+          roomRequest,
+          search:{
+            currency:r.currency||'AED',
+            board:r.board||''
+          }
+        })
+      });
+
+      const payload=await response.json();
+
+      if(!response.ok||!payload.ok){
+        throw new Error(payload.error||'Unable to load Book4trip rates');
+      }
+
+      const overlay=document.createElement('div');
+      overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px';
+
+      const modal=document.createElement('div');
+      modal.style.cssText='background:#fff;border-radius:10px;width:min(1000px,95vw);max-height:90vh;overflow:auto;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.3)';
+
+      const close=document.createElement('button');
+      close.type='button';
+      close.textContent='Close';
+      close.style.cssText='float:right;padding:7px 14px;cursor:pointer';
+      close.addEventListener('click',()=>overlay.remove());
+
+      const title=document.createElement('h2');
+      title.textContent=hotelName||'Book4trip Rates';
+
+      modal.appendChild(close);
+      modal.appendChild(title);
+
+      const rooms=Array.isArray(payload.rooms)?payload.rooms:[];
+      
+
+      if(!rooms.length){
+        const empty=document.createElement('p');
+        empty.textContent='No room rates were returned by Book4trip.';
+        modal.appendChild(empty);
+      }else{
+        const table=document.createElement('table');
+        table.style.cssText='width:100%;border-collapse:collapse;margin-top:18px';
+
+        const thead=document.createElement('thead');
+        const header=document.createElement('tr');
+
+        ['Room','Board','Cancellation','Price','Currency','Availability'].forEach(label=>{
+          const th=document.createElement('th');
+          th.textContent=label;
+          th.style.cssText='text-align:left;padding:10px;border-bottom:2px solid #ddd;background:#f7f7f7';
+          header.appendChild(th);
+        });
+
+        thead.appendChild(header);
+        table.appendChild(thead);
+
+        const tbody=document.createElement('tbody');        
+        const renderBook4tripRates=async()=>{
+          const filters=filterBar.getValues();
+          const selectedMeal=String(filters.meal||'').trim().toLowerCase();
+          const selectedCancellation=String(filters.cancellation||'').trim().toLowerCase();
+
+          const filtered=rooms.filter(rate=>{
+            const meal=String(rate.board||rate.mealBasis||'').trim().toLowerCase();
+            const cancellation=String(rate.cancellation||'').trim().toLowerCase();
+
+            if(selectedMeal && meal!==selectedMeal){
+              return false;
+            }
+
+            if(selectedCancellation && cancellation!==selectedCancellation){
+              return false;
+            }
+
+            return true;
+          });
+
+          tbody.innerHTML='';
+
+          const usdRate=await waitForAedUsdRate();
+
+          filtered.forEach(rate=>{
+            const row=document.createElement('tr');
+
+            const values=[
+              rate.roomName||rate.roomCategory||rate.room||'—',
+              rate.board||rate.mealBasis||'—',
+              rate.cancellation||'—'
+            ];
+
+            values.forEach(value=>{
+              const cell=document.createElement('td');
+              cell.textContent=String(value);
+              cell.style.cssText='padding:10px;border-bottom:1px solid #eee';
+              row.appendChild(cell);
+            });
+
+            const priceCell=document.createElement('td');
+            const numericPrice=Number(rate.price);
+
+            if(Number.isFinite(numericPrice)){
+              const aed=document.createElement('div');
+              aed.textContent=(rate.currency||'AED')+' '+numericPrice.toFixed(2);
+              aed.style.fontWeight='600';
+              priceCell.appendChild(aed);
+
+              if(
+                String(rate.currency||'AED').toUpperCase()==='AED' &&
+                Number.isFinite(usdRate) &&
+                usdRate>0
+              ){
+                  const currencyCell=document.createElement('td');
+                currencyCell.textContent='USD '+(numericPrice*usdRate).toFixed(2);
+                currencyCell.style.cssText='padding:10px;border-bottom:1px solid #eee;font-weight:600';
+                row.appendChild(currencyCell);
+              }
+            }else{
+              priceCell.textContent='—';
+            }
+
+            priceCell.style.cssText='padding:10px;border-bottom:1px solid #eee';
+            row.appendChild(priceCell);
+
+            const availabilityCell=document.createElement('td');
+            availabilityCell.textContent=rate.available?'Available':'On Request';
+            availabilityCell.style.cssText='padding:10px;border-bottom:1px solid #eee';
+            row.appendChild(availabilityCell);
+
+            tbody.appendChild(row);
+          });
+        };
+
+
+        const filterBar=createBook4tripRateFilters(rooms,()=>renderBook4tripRates());
+        modal.appendChild(filterBar.element);
+        await renderBook4tripRates();
+
+        table.appendChild(tbody);
+        modal.appendChild(table);
+      }
+
+      overlay.appendChild(modal);
+      overlay.addEventListener('click',(ev)=>{
+        if(ev.target===overlay)overlay.remove();
+      });
+      document.body.appendChild(overlay);
+
+    }catch(error){
+      alert('Book4trip rates could not be loaded: '+String(error&&error.message||error));
+    }finally{
+      a.textContent='View Rates';
+      a.style.pointerEvents='';
+    }
+  });
+
+  td.appendChild(a);
+  tr.appendChild(td);
+
+}else{
+  const viewValue=String(r.raw?.availability||r.view||r.url||'').trim();
+
+if(
+  /locanda/i.test(String(r.supplier||r.source||'')) &&
+  /^https?:\/\/app\.locandahub\.com\/agent\/booking\/availability\.php\?/i.test(viewValue)
+){
+  const td=document.createElement('td');
+  const a=document.createElement('a');
+
+  a.href='#';
+  a.textContent=/locanda/i.test(String(r.supplier || r.source || ''))?'View More Rooms':'View Rates';
+  a.className='hotel-view-link';
+
+  a.addEventListener('click',async(ev)=>{
+    ev.preventDefault();
+
+    const hotelName=String(r.hotel||'').trim();
+    const detailUrl=String(r.raw?.availability||r.view||r.url||'').trim();
 
     a.textContent='Loading...';
     a.style.pointerEvents='none';
@@ -1853,7 +2096,7 @@ if(
         String(error&&error.message||error)
       );
     }finally{
-      a.textContent='View Rates';
+      a.textContent=/locanda/i.test(String(r.supplier || r.source || ''))?'View More Rooms':'View Rates';
       a.style.pointerEvents='';
     }
   });
@@ -1869,7 +2112,7 @@ if(
   const a=document.createElement('a');
 
   a.href='#';
-  a.textContent='View Rates';
+  a.textContent=/locanda/i.test(String(r.supplier || r.source || ''))?'View More Rooms':'View Rates';
   a.className='hotel-view-link';
 
   a.addEventListener('click',async(ev)=>{
@@ -2165,7 +2408,7 @@ if(
         String(error&&error.message||error)
       );
     }finally{
-      a.textContent='View Rates';
+      a.textContent=/locanda/i.test(String(r.supplier || r.source || ''))?'View More Rooms':'View Rates';
       a.style.pointerEvents='';
     }
   });
@@ -2177,8 +2420,8 @@ if(
   addCell(tr,r.view);
 }
 }
-        addCell(tr,/locanda/i.test(String(r.supplier || r.source || "")) ? "" : r.board);
-        addCell(tr,/locanda/i.test(String(r.supplier || r.source || "")) ? "" : r.cancellation);
+        addCell(tr,r.board);
+        addCell(tr,r.cancellation);
         const numericPrice =
           r.price==null || !Number.isFinite(Number(r.price))
             ? null
@@ -2206,27 +2449,6 @@ if(
         );
 
         if(/locanda/i.test(String(r.supplier || r.source || "")) && String(r.availability || "").includes("locandahub.com/agent/booking/availability.php")){
-          const td=document.createElement('td');
-          const a=document.createElement('a');
-
-          a.href='#';
-          a.textContent='Show Rooms';
-          a.className='hotel-view-link';
-
-          a.addEventListener('click',(ev)=>{
-            ev.preventDefault();
-
-            const existingViewLink=tr.querySelector('.hotel-view-link');
-
-            if(existingViewLink && existingViewLink!==a){
-              existingViewLink.click();
-            }else{
-              alert('Locanda rates link is not ready.');
-            }
-          });
-
-          td.appendChild(a);
-          tr.appendChild(td);
         }else{
           addCell(tr,r.availability);
         }
@@ -2399,7 +2621,7 @@ function startFloatingSearchProgress(supplierIds){
     <div class="floating-search-header">
       <div>
         <div class="floating-search-title">
-          <span class="floating-search-icon">🔍</span>
+          <span class="floating-search-icon">??</span>
           SEARCHING HOTELS
         </div>
         <div class="floating-search-destination">${destination}</div>
@@ -2410,12 +2632,12 @@ function startFloatingSearchProgress(supplierIds){
         class="floating-search-collapse"
         id="floating-search-collapse"
         aria-label="Minimize search progress">
-        −
+        -
       </button>
     </div>
 
     <div class="floating-search-details">
-      ${checkin} → ${checkout}
+      ${checkin} ? ${checkout}
       <span>•</span>
       ${adults} adults
       <span>•</span>
@@ -2459,7 +2681,7 @@ function startFloatingSearchProgress(supplierIds){
   if(collapse){
     collapse.addEventListener('click',()=>{
       const collapsed=box.classList.toggle('collapsed');
-      collapse.textContent=collapsed?'+':'−';
+      collapse.textContent=collapsed?'+':'-';
       collapse.setAttribute(
         'aria-label',
         collapsed
@@ -2524,7 +2746,7 @@ function stopFloatingSearchProgress(finalData=null){
 
   if(title){
     title.innerHTML=`
-      <span class="floating-search-icon completed-icon">✓</span>
+      <span class="floating-search-icon completed-icon">?</span>
       <span>SEARCH COMPLETED</span>
     `;
   }
@@ -2581,7 +2803,7 @@ function stopFloatingSearchProgress(finalData=null){
       row.classList.add('failed');
 
       if(spinner){
-        spinner.textContent='✕';
+        spinner.textContent='?';
         spinner.classList.remove('completed');
         spinner.classList.add('failed');
       }
@@ -2597,7 +2819,7 @@ function stopFloatingSearchProgress(finalData=null){
       row.classList.add('completed');
 
       if(spinner){
-        spinner.textContent='✓';
+        spinner.textContent='?';
         spinner.classList.add('completed');
         spinner.classList.remove('failed');
       }
@@ -2629,7 +2851,7 @@ function stopFloatingSearchProgress(finalData=null){
   const collapseButton=$('floating-search-collapse');
 
   if(collapseButton){
-    collapseButton.textContent='−';
+    collapseButton.textContent='-';
   }
 
   setTimeout(()=>{
@@ -2652,6 +2874,12 @@ function stopFloatingSearchProgress(finalData=null){
 
 // Restore authenticated session after page refresh.
 (async()=>{try{const me=await api('/api/auth/me');$('who').textContent=me.username;hide('login-view');show('app-view');applyRole(me.role);await loadSources();loadSupplierHealth()}catch{}})();
+
+
+
+
+
+
 
 
 

@@ -1,4 +1,4 @@
-﻿* {
+* {
   box-sizing: border-box;
 }
 :root {
@@ -144,7 +144,7 @@ form select {
 }
 .hint {
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 1.3rem;
 }
 .dashboard-health {
   background: linear-gradient(135deg, #fff, #f7fbff);
