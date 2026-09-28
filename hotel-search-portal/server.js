@@ -1,4 +1,4 @@
-if(!process.env.CLOUDFLARE)require('dotenv').config();
+﻿if(!process.env.CLOUDFLARE)require('dotenv').config();
 const bcrypt=require('bcryptjs');const jwt=require('jsonwebtoken');const speakeasy=require('speakeasy');const db=require('./db');const {encrypt}=require('./crypto-util');const connectors=require('./connectors');const geo=require('countrycitystatejson');
 const JWT_SECRET=process.env.JWT_SECRET;if(!JWT_SECRET||JWT_SECRET.length<32)throw new Error('JWT_SECRET must be at least 32 characters');
 const loginAttempts=new Map();const BOARDS=['ROOM_ONLY','BED_AND_BREAKFAST','HALF_BOARD','FULL_BOARD','ALL_INCLUSIVE'];const jsonHeaders={'content-type':'application/json; charset=utf-8','cache-control':'no-store'};
@@ -159,7 +159,148 @@ if(path==='/api/supplier-health'&&method==='GET'){try{const r=await db.query("SE
      },500);
    }
  }
- if(path==='/api/locanda/rates'&&method==='POST'){
+ if(path==='/api/book4trip/master-retry'&&method==='POST'){
+  try{
+    if(!staff)return json({error:'Unauthorized'},401);
+    if(!allowed(staff.role,'SUPER_ADMIN','ADMIN'))return json({error:'Insufficient permissions'},403);
+
+    const fs=require('fs');
+    const book4trip=require('./connectors/book4trip-http');
+
+    const errorFile='book4trip-hotel-retry-errors.json';
+    const hotelFile='book4trip-hotel-master.json';
+    const emptyFile='book4trip-hotel-retry-empty.json';
+
+    const errors=fs.existsSync(errorFile)
+      ? JSON.parse(fs.readFileSync(errorFile,'utf8').replace(/^\uFEFF/,''))
+      : [];
+
+    const hotels=fs.existsSync(hotelFile)
+      ? JSON.parse(fs.readFileSync(hotelFile,'utf8').replace(/^\uFEFF/,''))
+      : [];
+
+    const retryEmpty=fs.existsSync(emptyFile)
+      ? JSON.parse(fs.readFileSync(emptyFile,'utf8').replace(/^\uFEFF/,''))
+      : [];
+
+    if(!errors.length){
+      return json({
+        ok:true,
+        message:'NO FAILED DESTINATIONS TO RETRY',
+        totalHotels:hotels.length
+      });
+    }
+
+    (async()=>{
+      const remainingErrors=[];
+      const newEmpty=[...retryEmpty];
+
+      for(let i=0;i<errors.length;i++){
+        const destination=errors[i];
+
+        try{
+          const result=await book4trip.getBook4TripHotelListAuthenticated(
+            destination.DestinationValue
+          );
+
+          if(!result.ok){
+            remainingErrors.push({
+              ...destination,
+              RetryStatus:result.status
+            });
+            continue;
+          }
+
+          const matches=[
+            ...result.html.matchAll(
+              /new Option\('((?:[^'\\]|\\.)*)','((?:[^'\\]|\\.)*)'(?:,\s*true)?\)/g
+            )
+          ];
+
+          const rows=matches.filter(
+            x=>x[1]!=='- Please select a hotel -'
+          );
+
+          if(!rows.length){
+            newEmpty.push(destination);
+          }else{
+            for(const x of rows){
+              hotels.push({
+                CountryCode:destination.CountryCode,
+                CountryName:destination.CountryName,
+                DestinationName:destination.DestinationName,
+                DestinationValue:destination.DestinationValue,
+                HotelName:x[1],
+                HotelId:x[2]
+              });
+            }
+          }
+
+          if((i+1)%100===0){
+            fs.writeFileSync(hotelFile,JSON.stringify(hotels,null,2),'utf8');
+            fs.writeFileSync(errorFile,JSON.stringify(remainingErrors,null,2),'utf8');
+            fs.writeFileSync(emptyFile,JSON.stringify(newEmpty,null,2),'utf8');
+            console.log(`BOOK4TRIP RETRY CHECKPOINT: ${i+1}/${errors.length}`);
+          }
+
+          await new Promise(resolve=>setTimeout(resolve,150));
+        }catch(error){
+          remainingErrors.push({
+            ...destination,
+            RetryError:String(error&&error.message||error)
+          });
+        }
+      }
+
+      fs.writeFileSync(hotelFile,JSON.stringify(hotels,null,2),'utf8');
+      fs.writeFileSync(errorFile,JSON.stringify(remainingErrors,null,2),'utf8');
+      fs.writeFileSync(emptyFile,JSON.stringify(newEmpty,null,2),'utf8');
+
+      console.log('BOOK4TRIP RETRY COMPLETE');
+      console.log('TOTAL HOTELS:',hotels.length);
+      console.log('RETRY EMPTY:',newEmpty.length);
+      console.log('RETRY ERRORS:',remainingErrors.length);
+    })().catch(error=>{
+      console.error('BOOK4TRIP RETRY BACKGROUND ERROR:',error);
+    });
+
+    return json({
+      ok:true,
+      started:true,
+      failedDestinations:errors.length,
+      existingHotels:hotels.length
+    });
+  }catch(e){
+    console.error('BOOK4TRIP RETRY START ERROR:',e);
+    return json({
+      ok:false,
+      error:String(e&&e.message||e||'Book4trip retry failed')
+    },500);
+  }
+}if(path==='/api/book4trip/master-test'&&method==='GET'){
+  try{
+   const book4trip=require('./connectors/book4trip-http');
+   const destination=new URL(req.url).searchParams.get('destination')||'hasselt';
+
+   const result=await book4trip.getBook4TripHotelListAuthenticated(
+    destination
+   );
+
+   return json({
+    ok:true,
+    destination,
+    status:result.status,
+    htmlLength:result.html.length,
+    hasHotels:/new Option\s*\(/i.test(result.html)
+   });
+  }catch(e){
+   console.error('BOOK4TRIP MASTER TEST ERROR:',e);
+   return json({
+    ok:false,
+    error:String(e&&e.message||e||'Book4trip master test failed')
+   },500);
+  }
+ } if(path==='/api/locanda/rates'&&method==='POST'){
   try{
     const{url,hotel}=await body(req);
 
@@ -332,7 +473,64 @@ console.log('SEARCH SUPPLIER FILTER:',{
 
 const connectorResult=await connectors.searchAll({destination:destination.trim(),destinationCountry:String(destinationCountry||'').trim(),checkin,checkout,guests:Number(guests),rooms:Number(rooms),board,hotel_name:hotelFilter},selectedSources);return json({searchId:r.rows[0].id,results:connectorResult.results,connectorStatuses:connectorResult.statuses,links:selectedSources.map(x=>({sourceId:x.id,name:x.name,url:fill(x.deep_link_template,{destination,checkin,checkout,guests,rooms,board})||x.login_url}))})}catch(e){console.error(e);return json({error:'Search could not be completed'},500)}}
  if(path==='/api/history'&&method==='GET'){const isAdmin=['SUPER_ADMIN','ADMIN','MANAGER'].includes(staff.role);const q=isAdmin?'SELECT searches.*,staff.username FROM searches JOIN staff ON staff.id=searches.staff_id ORDER BY created_at DESC LIMIT 100':'SELECT searches.*,staff.username FROM searches JOIN staff ON staff.id=searches.staff_id WHERE staff_id=$1 ORDER BY created_at DESC LIMIT 100';const r=await db.query(q,isAdmin?[]:[staff.staffId]);return json(r.rows)}
- if(path.startsWith('/api/comparisons/')&&method==='GET')return json([]);if(path.startsWith('/api/comparisons/')&&method==='DELETE')return json({ok:true});return json({error:'Not found'},404)}
+ if(path.startsWith('/api/comparisons/')&&method==='GET')return json([]);if(path.startsWith('/api/comparisons/')&&method==='DELETE')return json({ok:true});
+if(path.startsWith('/api/master-data/')&&method==='GET'){
+  const type=path.split('/').pop();
+
+  if(type==='countries'){
+    const r=await db.query(`
+      SELECT id,source_id,country_name,country_code,iso_code,active
+      FROM supplier_countries
+      WHERE active=TRUE
+      ORDER BY source_id,country_name
+    `);
+    return json(r.rows);
+  }
+
+  if(type==='destinations'){
+    const r=await db.query(`
+      SELECT id,source_id,country_id,destination_name,
+             destination_code,destination_value,active
+      FROM supplier_destinations
+      WHERE active=TRUE
+      ORDER BY source_id,destination_name
+    `);
+    return json(r.rows);
+  }
+
+  if(type==='hotels'){
+    const r=await db.query(`
+      SELECT id,source_id,country_id,destination_id,
+             hotel_name,hotel_code,supplier_hotel_id,active
+      FROM supplier_hotels
+      WHERE active=TRUE
+      ORDER BY source_id,hotel_name
+    `);
+    return json(r.rows);
+  }
+
+  if(type==='search'){
+    const u=new URL(req.url);
+    const q=String(u.searchParams.get('q')||'').trim();
+
+    if(!q){
+      return json([]);
+    }
+
+    const r=await db.query(`
+      SELECT id,source_id,country_id,destination_id,
+             hotel_name,hotel_code,supplier_hotel_id
+      FROM supplier_hotels
+      WHERE active=TRUE
+        AND hotel_name ILIKE $1
+      ORDER BY source_id,hotel_name
+      LIMIT 100
+    `,['%' + q + '%']);
+
+    return json(r.rows);
+  }
+}
+return json({error:'Not found'},404)}
 const initPromise=db.init();initPromise.catch(e=>console.error(e));async function handleRequest(req){
 const url=new URL(req.url);
 const origin=req.headers.get('origin');
@@ -351,6 +549,8 @@ if(req.method==='OPTIONS'&&url.pathname.startsWith('/api/')){
 }
 if(url.pathname==='/health'){try{await db.query('SELECT 1');return json({ok:true},200,corsHeaders)}catch(e){console.error(e);return json({ok:false},503,corsHeaders)}}if(url.pathname.startsWith('/api/')){try{const response=await handleApi(req,url);return new Response(response.body,{status:response.status,headers:{...Object.fromEntries(response.headers),...corsHeaders}})}catch(e){console.error(e);return json({error:'Request failed'},500,corsHeaders)}}return new Response('Not found',{status:404,headers:htmlHeaders()})}
 module.exports={handleRequest,initPromise};
+
+
 
 
 

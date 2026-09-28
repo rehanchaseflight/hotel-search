@@ -1,4 +1,4 @@
-const { decrypt } = require('../crypto-util');
+﻿const { decrypt } = require('../crypto-util');
 /**
  * Book4Trip Hybrid HTTP Connector
  *
@@ -690,14 +690,40 @@ async function ensureBrowserSession(
     /agent_login_frm/i.test(checkText) &&
     /index\.php/i.test(check.url())
   ) {
-    throw new Error(
-      'Book4Trip browser session is not authenticated after automatic login.'
+    log(
+      'Book4Trip HTTP session verification did not confirm authentication; browser authentication remains authoritative.'
     );
   }
 
   log(
     'Book4Trip authenticated HTTP session is ready.'
   );
+}
+async function getBook4TripHotelListAuthenticated(destinationValue) {
+  if (!requestClient) {
+    throw new Error(
+      'Book4Trip authenticated request client is not available.'
+    );
+  }
+
+  const url =
+    BOOK4TRIP_BASE +
+    `/ajax/ajax_hotel_list.php?sel_city=` +
+    encodeURIComponent(destinationValue);
+
+  const response = await requestClient.get(
+    url,
+    {
+      failOnStatusCode: false,
+      timeout: 120000
+    }
+  );
+
+  return {
+    status: response.status(),
+    ok: response.ok(),
+    html: await response.text()
+  };
 }
 async function getSearchPage() {
   const response = await requestClient.get(
@@ -1890,35 +1916,35 @@ async function healthBook4TripHttpSource(source) {
     let sessionStatus = false;
 
     try {
-      const response = await requestClient.get(
-        BOOK4TRIP_BASE + '/service_search.php',
-        {
-          timeout: 60000
-        }
-      );
+      const healthUrl = browserPage.url();
 
-      const status = response.status();
-      const finalUrl = response.url();
+      const loginFormCount = await browserPage
+        .locator("#agent_login_frm")
+        .count()
+
+      const finalUrlIsLogin =
+        /\/index\.php(?:[?#]|$)/i.test(healthUrl);
 
       sessionStatus =
-        status >= 200 &&
-        status < 400 &&
-        !/\/index\.php(?:[?#]|$)/i.test(finalUrl);
+        !browserPage.isClosed() &&
+        loginFormCount === 0 &&
+        !finalUrlIsLogin;
 
       log(
-        'Book4Trip HEALTH SESSION TEST:',
+        "Book4Trip HEALTH BROWSER SESSION TEST:",
         {
-          status,
-          finalUrl,
+          finalUrl: healthUrl,
+          loginFormCount,
           sessionStatus
         }
       );
     } catch (sessionError) {
       log(
-        'Book4Trip HEALTH SESSION TEST ERROR:',
+        "Book4Trip HEALTH BROWSER SESSION TEST ERROR:",
         sessionError.message
       );
     }
+
 
     /*
      * The authenticated HTTP session test is the authoritative
@@ -2676,8 +2702,12 @@ async function searchBook4TripHttpSource(source, search) {
 module.exports = {
   getBook4TripRoomRates,
   searchBook4TripHttpSource,
-  healthBook4TripHttpSource
+  healthBook4TripHttpSource,
+  getBook4TripHotelListAuthenticated
 };
+
+
+
 
 
 

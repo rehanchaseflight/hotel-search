@@ -1,4 +1,4 @@
-ï»¿let tempToken=null,currentSearchId=null,currentSources=[];
+let tempToken=null,currentSearchId=null,currentSources=[];
 const $=id=>document.getElementById(id),show=id=>$(id).classList.remove("hidden"),hide=id=>$(id).classList.add("hidden");
 
 (function setupDestinationAutocomplete(){
@@ -260,7 +260,7 @@ async function manualWanderBedsLogin(){
   }
 }
 
-async function loadSources(){try{currentSources=await api('/api/sources');renderSearchSupplierControls();const nameInput=$('source-name');const wanted=(nameInput?.value||'WanderBeds').trim();const editing=$('source-form')?.dataset.editing==='true';const source=currentSources.find(s=>new RegExp(wanted,'i').test(s.name||''))||currentSources.find(s=>/wanderbeds/i.test(s.name||''));if(source&&!editing){nameInput.value=source.name;$('source-login-url').value=source.login_url||'https://wanderbeds.com/?setlang=en';$('source-agent-code').value=source.agent_code||'';$('source-username').value=source.site_username||'';$('source-password').value='';$('source-form').dataset.sourceId=source.id}else if(!source&&!editing){$('source-form').dataset.sourceId=''}const tbody=document.querySelector('#sources-table tbody');if(!tbody)return;tbody.innerHTML='';currentSources.filter(s=>/hadaf|wanderbeds|locanda|rezlive/i.test(s.name||'')).forEach(s=>{const tr=document.createElement('tr');const credentialStatus=s.has_password?'Encrypted credentials':'Not configured';tr.innerHTML=`<td>${s.name}</td><td>${s.login_url||'â€”'}</td><td>Browser / B2B login</td><td>${credentialStatus}</td><td><button type="button" class="source-edit-btn" data-edit-source="${s.id}">Edit</button>${/wanderbeds/i.test(s.name||"")?'<button type="button" class="source-edit-btn" data-wanderbeds-login="1" style="margin-left:6px">Login Manually</button>':''}</td>`;tbody.appendChild(tr)})}catch(err){console.error(err)}}
+async function loadSources(){try{currentSources=await api('/api/sources');renderSearchSupplierControls();const nameInput=$('source-name');const wanted=(nameInput?.value||'WanderBeds').trim();const editing=$('source-form')?.dataset.editing==='true';const source=currentSources.find(s=>new RegExp(wanted,'i').test(s.name||''))||currentSources.find(s=>/wanderbeds/i.test(s.name||''));if(source&&!editing){nameInput.value=source.name;$('source-login-url').value=source.login_url||'https://wanderbeds.com/?setlang=en';$('source-agent-code').value=source.agent_code||'';$('source-username').value=source.site_username||'';$('source-password').value='';$('source-form').dataset.sourceId=source.id}else if(!source&&!editing){$('source-form').dataset.sourceId=''}const tbody=document.querySelector('#sources-table tbody');if(!tbody)return;tbody.innerHTML='';currentSources.filter(s=>/hadaf|wanderbeds|locanda|rezlive|book4trip/i.test(s.name||'')).forEach(s=>{const tr=document.createElement('tr');const credentialStatus=s.has_password?'Encrypted credentials':'Not configured';tr.innerHTML=`<td>${s.name}</td><td>${s.login_url||'—'}</td><td>Browser / B2B login</td><td>${credentialStatus}</td><td><button type="button" class="source-edit-btn" data-edit-source="${s.id}">Edit</button>${/wanderbeds/i.test(s.name||"")?'<button type="button" class="source-edit-btn" data-wanderbeds-login="1" style="margin-left:6px">Login Manually</button>':''}</td>`;tbody.appendChild(tr)})}catch(err){console.error(err)}}
 async function saveSource(e){e.preventDefault();const msg=$('source-message');msg.textContent='';msg.className='admin-message';try{const supplier=$('source-name').value.trim()||'WanderBeds';const existing=currentSources.find(s=>String(s.id)==String($('source-form').dataset.sourceId))||currentSources.find(s=>new RegExp('^'+supplier.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$','i').test(s.name||''));const isLocanda=/locanda/i.test(supplier);const isRezLive=/rezlive/i.test(supplier);const browserConfig=isLocanda?{preset:'locanda',requires_manual_captcha:true}:isRezLive?{preset:'rezlive'}:{preset:'wanderbeds'};const payload={name:supplier,login_url:$('source-login-url').value.trim(),site_username:$('source-username').value.trim(),site_password:$('source-password').value,agent_code:$('source-agent-code').value.trim(),enabled:true,browser_config:browserConfig};if(existing){await api(`/api/sources/${existing.id}`,{method:'PUT',body:JSON.stringify(payload)});$('source-form').dataset.sourceId=existing.id;msg.textContent=`${supplier} credentials updated and encrypted.`}else{const d=await api('/api/sources',{method:'POST',body:JSON.stringify({...payload,connector_type:'browser'})});$('source-form').dataset.sourceId=d.id;msg.textContent=`${supplier} supplier saved. Credentials are encrypted.`}$('source-password').value='';$('source-form').dataset.editing='';$('source-cancel').classList.add('hidden');await loadSources();await loadSupplierHealth()}catch(err){msg.textContent=err.message;msg.className='admin-message error'}}
 $('source-form')?.addEventListener('submit',saveSource);
 $('source-cancel')?.addEventListener('click',cancelSourceEdit);
@@ -278,7 +278,7 @@ $('sources-table')?.addEventListener('click',e=>{
   }
 });
 
-async function loadSupplierHealth(){const box=$('dashboard-supplier-status');if(!box)return;try{box.innerHTML='<div class="searching-status">Checking supplier connectionsâ€¦</div>';renderSupplierStatus(await api('/api/supplier-health'),'dashboard-supplier-status')}catch(err){box.innerHTML=`<p class="error">Supplier health check failed: ${err.message}</p>`}}
+async function loadSupplierHealth(){const box=$('dashboard-supplier-status');if(!box)return;try{box.innerHTML='<div class="searching-status">Checking supplier connections…</div>';renderSupplierStatus(await api('/api/supplier-health'),'dashboard-supplier-status')}catch(err){box.innerHTML=`<p class="error">Supplier health check failed: ${err.message}</p>`}}
 function renderSupplierStatus(statuses,targetId='supplier-status'){
   const box=$(targetId);
   if(!box)return;
@@ -308,7 +308,7 @@ function renderSupplierStatus(statuses,targetId='supplier-status'){
     summaryParts.push(`<strong>${notSignedInCount} not signed in</strong>`);
   }
 
-  summary.innerHTML=summaryParts.join(' â€¢ ');
+  summary.innerHTML=summaryParts.join(' • ');
   box.appendChild(summary);
 
   list.forEach(s=>{
@@ -343,7 +343,7 @@ function renderSupplierStatus(statuses,targetId='supplier-status'){
     box.appendChild(card);
   });
 }
-function addCell(tr,value,cls=''){const td=document.createElement('td');td.textContent=value===null||value===undefined||value===''?'â€”':value;if(cls)td.className=cls;tr.appendChild(td)}
+function addCell(tr,value,cls=''){const td=document.createElement('td');td.textContent=value===null||value===undefined||value===''?'—':value;if(cls)td.className=cls;tr.appendChild(td)}
 function getSelectedSupplierIds(){
   const selected=[];
   document
@@ -514,18 +514,18 @@ $('search-form').addEventListener('submit',async e=>{
   const button=e.target.querySelector('button[type="submit"]');
 
   button.disabled=true;
-  button.textContent='Searchingâ€¦';
+  button.textContent='Searching…';
 
   show('results-section');
 
   $('search-summary').textContent=
-    `${$('s-destination').value} â€¢ ${$('s-checkin').value} to ${$('s-checkout').value} â€¢ ${$('s-adults').value} adults â€¢ ${$('s-children').value} children â€¢ ${$('s-rooms').value} room${Number($('s-rooms').value)===1?'':'s'}`;
+    `${$('s-destination').value} • ${$('s-checkin').value} to ${$('s-checkout').value} • ${$('s-adults').value} adults • ${$('s-children').value} children • ${$('s-rooms').value} room${Number($('s-rooms').value)===1?'':'s'}`;
 
   $('supplier-status').innerHTML=
-    '<div class="searching-status">Searching live suppliersâ€¦</div>';
+    '<div class="searching-status">Searching live suppliers…</div>';
 
   $('live-results').innerHTML=
-    '<p class="hint">Waiting for live supplier ratesâ€¦</p>';
+    '<p class="hint">Waiting for live supplier rates…</p>';
 
   startFloatingSearchProgress(supplierIds);
 
@@ -825,7 +825,7 @@ function renderResults(results,statuses){
       r=>r.price!=null&&Number.isFinite(Number(r.price))&&Number(r.price)>0
     ).length;
 
-    count.textContent=`${filtered.length} live rates â€¢ ${priced} priced`;
+    count.textContent=`${filtered.length} live rates • ${priced} priced`;
 
     const old=box.querySelector('.rate-table-wrap');
     if(old)old.remove();
@@ -917,8 +917,8 @@ function renderResults(results,statuses){
 
         addCell(tr,r.hotel,index===0?'hotel-group-name':'');
         if(/rezlive/i.test(String(r.supplier || r.source || ""))){
-          addCell(tr,'â€”');
-          addCell(tr,'â€”');
+          addCell(tr,'—');
+          addCell(tr,'—');
         }else{
           addCell(tr,r.room);
           addCell(tr,r.category);
@@ -1085,11 +1085,11 @@ function renderResults(results,statuses){
                   const row=document.createElement('tr');
 
                   [
-                    rate.room||'â€”',
-                    rate.inclusion||'â€”',
-                    rate.board||'â€”',
-                    rate.perRoomRate||'â€”',
-                    rate.total||'â€”'
+                    rate.room||'—',
+                    rate.inclusion||'—',
+                    rate.board||'—',
+                    rate.perRoomRate||'—',
+                    rate.total||'—'
                   ].forEach(value=>{
                     const cell=document.createElement('td');
                     cell.textContent=String(value);
@@ -1243,7 +1243,7 @@ function renderResults(results,statuses){
 
                     cancelCell.appendChild(cancelLink);
                   }else{
-                    cancelCell.textContent='â€”';
+                    cancelCell.textContent='—';
                   }
 
                   row.appendChild(cancelCell);
@@ -1541,7 +1541,7 @@ function renderResults(results,statuses){
                 )+
                 ' total'+
                 (rate.nights
-                  ?' Â· '+rate.nights+' nights'
+                  ?' · '+rate.nights+' nights'
                   :'');
             }
 
@@ -1722,9 +1722,9 @@ function renderResults(results,statuses){
             const row=document.createElement('tr');
 
             const values=[
-              rate.roomName||rate.roomCategory||rate.room||'â€”',
-              rate.board||rate.mealBasis||'â€”',
-              rate.cancellation||'â€”'
+              rate.roomName||rate.roomCategory||rate.room||'—',
+              rate.board||rate.mealBasis||'—',
+              rate.cancellation||'—'
             ];
 
             values.forEach(value=>{
@@ -1754,7 +1754,7 @@ function renderResults(results,statuses){
                 row.appendChild(currencyCell);
               }
             }else{
-              priceCell.textContent='â€”';
+              priceCell.textContent='—';
             }
 
             priceCell.style.cssText='padding:10px;border-bottom:1px solid #eee';
@@ -2045,7 +2045,7 @@ if(
                   }
                 )+
                 ' total'+
-                (rate.nights?' Â· '+rate.nights+' nights':'');
+                (rate.nights?' · '+rate.nights+' nights':'');
             }
 
             card.appendChild(room);
@@ -2353,7 +2353,7 @@ if(
                   }
                 )+
                 ' total'+
-                (rate.nights?' Â· '+rate.nights+' nights':'');
+                (rate.nights?' · '+rate.nights+' nights':'');
             }
 
             card.appendChild(room);
@@ -2429,7 +2429,7 @@ if(
 
         const currencyCode = String(r.currency||'AED').trim().toUpperCase();
 
-        let priceText = 'â€”';
+        let priceText = '—';
 
         if(numericPrice != null){
           const baseText = `${currencyCode} ${numericPrice.toFixed(2)}`;
@@ -2455,7 +2455,7 @@ if(
 
         const supplierText=
           index===0
-            ? `${r.supplier} â€¢ BEST PRICE`
+            ? `${r.supplier} • BEST PRICE`
             : r.supplier;
 
         addCell(
@@ -2638,11 +2638,11 @@ function startFloatingSearchProgress(supplierIds){
 
     <div class="floating-search-details">
       ${checkin} ? ${checkout}
-      <span>â€¢</span>
+      <span>•</span>
       ${adults} adults
-      <span>â€¢</span>
+      <span>•</span>
       ${children} children
-      <span>â€¢</span>
+      <span>•</span>
       ${rooms} room${Number(rooms)===1?'':'s'}
     </div>
 
@@ -2663,7 +2663,7 @@ function startFloatingSearchProgress(supplierIds){
             <span>${s.name}</span>
           </div>
           <span class="floating-search-time">00:00</span>
-          <span class="floating-search-state">Searchingâ€¦</span>
+          <span class="floating-search-state">Searching…</span>
         </div>
       `).join('')}
     </div>
@@ -2839,7 +2839,7 @@ function stopFloatingSearchProgress(finalData=null){
 
     if(label){
       label.textContent=failedCount
-        ? `${completedCount} completed â€¢ ${failedCount} failed`
+        ? `${completedCount} completed • ${failedCount} failed`
         : 'Suppliers completed';
     }
 

@@ -110,6 +110,57 @@ async function init() {
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`);
 
+  await query(`CREATE TABLE IF NOT EXISTS supplier_countries (
+    id SERIAL PRIMARY KEY,
+    source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    country_name TEXT NOT NULL,
+    country_code TEXT,
+    iso_code TEXT,
+    raw_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS supplier_destinations (
+    id SERIAL PRIMARY KEY,
+    source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    country_id INTEGER REFERENCES supplier_countries(id) ON DELETE SET NULL,
+    destination_name TEXT NOT NULL,
+    destination_code TEXT,
+    destination_value TEXT,
+    raw_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS supplier_hotels (
+    id SERIAL PRIMARY KEY,
+    source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    country_id INTEGER REFERENCES supplier_countries(id) ON DELETE SET NULL,
+    destination_id INTEGER REFERENCES supplier_destinations(id) ON DELETE SET NULL,
+    hotel_name TEXT NOT NULL,
+    hotel_code TEXT,
+    supplier_hotel_id TEXT,
+    raw_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  await query(`CREATE INDEX IF NOT EXISTS idx_supplier_countries_source
+    ON supplier_countries(source_id)`);
+
+  await query(`CREATE INDEX IF NOT EXISTS idx_supplier_destinations_source
+    ON supplier_destinations(source_id)`);
+
+  await query(`CREATE INDEX IF NOT EXISTS idx_supplier_hotels_source
+    ON supplier_hotels(source_id)`);
+
+  await query(`CREATE INDEX IF NOT EXISTS idx_supplier_hotels_destination
+    ON supplier_hotels(destination_id)`);
+
   await query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sources_name_lower
     ON sources(LOWER(TRIM(name)))`);
 
@@ -131,3 +182,5 @@ module.exports = {
     }
   })
 };
+
+
